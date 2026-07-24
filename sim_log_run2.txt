@@ -1,0 +1,37 @@
+=== Pulsing start for timestep 0 at time 25 ===
+=== Pulsing start for timestep 1 at time 2355505 ===
+=== Pulsing start for timestep 2 at time 4710985 ===
+=== Pulsing start for timestep 3 at time 7066465 ===
+=== Pulsing start for timestep 4 at time 9421945 ===
+=== Pulsing start for timestep 5 at time 11777425 ===
+=== Pulsing start for timestep 6 at time 14132905 ===
+=== Pulsing start for timestep 7 at time 16488385 ===
+=== Pulsing start for timestep 8 at time 18843865 ===
+=== Pulsing start for timestep 9 at time 21199345 ===
+=== Pulsing start for timestep 10 at time 23554825 ===
+=== Pulsing start for timestep 11 at time 25910305 ===
+=== Pulsing start for timestep 12 at time 28265785 ===
+=== Pulsing start for timestep 13 at time 30621265 ===
+=== Pulsing start for timestep 14 at time 32976745 ===
+=== Pulsing start for timestep 15 at time 35332225 ===
+=== Pulsing start for timestep 16 at time 37687705 ===
+=== Pulsing start for timestep 17 at time 40043185 ===
+=== Pulsing start for timestep 18 at time 42398665 ===
+=== Pulsing start for timestep 19 at time 44754145 ===
+=== Pulsing start for timestep 20 at time 47109625 ===
+=== Pulsing start for timestep 21 at time 49465105 ===
+=== Pulsing start for timestep 22 at time 51820585 ===
+=== Pulsing start for timestep 23 at time 54176065 ===
+=== Pulsing start for timestep 24 at time 56531545 ===
+Final class counts:
+  class 0: 0 spikes
+  class 1: 0 spikes
+  class 2: 0 spikes
+  class 3: 1 spikes
+  class 4: 0 spikes
+  class 5: 1 spikes
+  class 6: 2 spikes
+  class 7: 0 spikes
+  class 8: 6 spikes
+  class 9: 0 spikes
+forward_pass.v:81: $finish called at 58887015 (1s)

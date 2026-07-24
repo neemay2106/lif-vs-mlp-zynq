@@ -1,0 +1,59 @@
+FixedPoint Q1.7 | range=[-1.0000, 0.9922] | precision=0.007812
+FixedPoint Q4.4 | range=[-8.0000, 7.9375] | precision=0.062500
+Q1.7: 0.5 + 0.25 = [0.75]
+Q4.4: 2.0 × 3.0 = [6.]
+Q1.7: 0.99 + 0.99 = [0.9921875]
+(784,)
+spikes =  5
+spikes out 0
+spikes =  14
+spikes out 0
+spikes =  23
+spikes out 0
+spikes =  26
+spikes out 0
+spikes =  13
+spikes out 1
+spikes =  35
+spikes out 0
+spikes =  14
+spikes out 0
+spikes =  26
+spikes out 0
+spikes =  23
+spikes out 1
+spikes =  18
+spikes out 2
+spikes =  16
+spikes out 0
+spikes =  40
+spikes out 1
+spikes =  13
+spikes out 0
+spikes =  22
+spikes out 1
+spikes =  20
+spikes out 0
+spikes =  29
+spikes out 1
+spikes =  21
+spikes out 0
+spikes =  25
+spikes out 1
+spikes =  17
+spikes out 0
+spikes =  26
+spikes out 0
+spikes =  22
+spikes out 1
+spikes =  25
+spikes out 0
+spikes =  15
+spikes out 0
+spikes =  33
+spikes out 1
+spikes =  22
+spikes out 0
+Total spikes over 25 timesteps:
+[0 0 0 1 0 1 2 0 6 0]
+Prediction: 8
