@@ -27,13 +27,34 @@ module axi_lite_slave (
     output reg  [31:0] S_AXI_RDATA,
     output reg  [1:0]  S_AXI_RRESP,
     output reg         S_AXI_RVALID,
-    input  wire        S_AXI_RREADY
+    input  wire        S_AXI_RREADY,
+
+    //wire into registers
+    input wire done, 
+    input wire [31:0] skipped_mac_count,
+    output wire  start,
+    output wire rst, 
+    output wire [31:0] threshold
 );
 
     reg [31:0] reg0_control;
     reg [31:0] reg1_status;
     reg [31:0] reg2_threshold;
     reg [31:0] reg3_skip_count;
+
+    assign start     = reg0_control[0];
+    assign rst       = reg0_control[1];
+    assign threshold = reg2_threshold;
+
+    always @(posedge S_AXI_ACLK) begin
+    if (!S_AXI_ARESETN) begin
+        reg1_status     <= 32'd0;
+        reg3_skip_count <= 32'd0;
+    end else begin
+        reg1_status     <= {31'd0, done};
+        reg3_skip_count <= skipped_mac_count;
+    end
+    end
 
     reg aw_latched, w_latched;
     reg [31:0] awaddr_captured, wdata_captured;
@@ -55,10 +76,10 @@ module axi_lite_slave (
             write_state     <= WRITE_IDLE;
             aw_latched      <= 0;
             w_latched       <= 0;
-            // reg0_control    <= 32'd0;
-            // reg2_threshold  <= 32'd0;
-            // reg1_status     <= 32'd0;
-            // reg3_skip_count <= 32'd0;
+            reg0_control    <= 32'd0;
+            reg2_threshold  <= 32'd0;
+            reg1_status     <= 32'd0;
+            reg3_skip_count <= 32'd0;
             S_AXI_BVALID    <= 0;
             S_AXI_AWREADY   <= 0;
             S_AXI_BRESP     <= 2'b00;
@@ -135,6 +156,7 @@ module axi_lite_slave (
                         S_AXI_RVALID  <= 1;
                         S_AXI_ARREADY <= 0;
                         read_state    <= READ_RESP;
+                        S_AXI_RDATA <= 0;
                     end
                 end
 

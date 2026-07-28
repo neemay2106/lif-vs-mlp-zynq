@@ -226,6 +226,7 @@ initial begin
 
     write_reg(32'h0000_0000,32'hABCDEF);
     read_reg(32'h0000_0000,read_data);
+    
     if(read_data == 32'hABCDEF) begin
         $display("worked");
     end

@@ -28,8 +28,9 @@ reg [0:0] spike_bits [0:783];
 integer j;
 integer out_fd,b;
 
+//input spikes beign fed 
 initial begin
-    $readmemh("/Users/neemayrajan/Documents/Project_2/spike/spikes_t1.txt", spike_bits);
+    $readmemh("/Users/neemayrajan/Documents/Project_2/spike/spikes_t17.txt", spike_bits);
     for (j = 0; j < 784; j = j + 1) begin
         spikes_in_vec[j] = spike_bits[j];
     end

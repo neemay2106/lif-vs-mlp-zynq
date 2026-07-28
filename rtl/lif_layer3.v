@@ -28,7 +28,6 @@ reg signed [31:0] membrane_mem [0:10];
 reg decayed_this_timestep [0:9];
 reg signed [15:0] mem_decayed;
 integer k;
-reg signed [15:0] curr;
 
 initial begin
     $readmemh("/Users/neemayrajan/Documents/Project_2/weights_layer3.hex", weight_mem);
@@ -69,7 +68,6 @@ always @(posedge clk) begin
             end
 
             ACCUMULATE: begin
-                curr <= 
                 if (spike_in_vec[input_idx] == 1) begin
                     membrane_mem[neuron_idx] <= mem_decayed + (weight_mem[neuron_idx*128 + input_idx] >>> 7);
                 end else begin

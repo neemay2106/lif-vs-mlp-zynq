@@ -64,6 +64,8 @@ module tb_full_inference;
             @(posedge clk);
             start <= 0;
 
+            $display("spikes_out_vec = %h, count of spikes = %0d", layer2_output, $countones(layer2_output));
+
             wait (done3 == 1);
 
             for (c = 0; c < 10; c = c + 1) begin
