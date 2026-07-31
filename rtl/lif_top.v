@@ -25,8 +25,12 @@ module lif_top(
 
 wire start_bit, reset_bit;
 wire [31:0] threshold_cfg;
-wire        done_signal;
+wire        done_layer_3;
 wire [31:0] skip_count_total;
+localparam NUM_TIMESTEPS = 25; 
+reg [4:0] timestep_count; 
+
+
 
 reg start_prev;
 wire start_pulse;
@@ -63,7 +67,7 @@ axi_lite_slave axi_slave(
     .S_AXI_RVALID  (S_AXI_RVALID),
     .S_AXI_RREADY  (S_AXI_RREADY),
 
-    .done(done_signal),
+    .done(true_done),
     .skipped_mac_count(skip_count_total),
     .start(start_bit),
     .rst(reset_bit),
@@ -92,6 +96,19 @@ assign start2 = done1 && !done1_prev;
 assign start3 = done2 && !done2_prev;
 
 wire layer_reset = reset_bit || !S_AXI_ARESETN;
+
+
+always @(posedge S_AXI_ACLK) begin 
+    if(layer_reset) begin 
+        timestep_count <= 0;
+    end else if(start_pulse) begin 
+        timestep_count <= timestep_count +1;
+    end
+end
+
+wire final_timestep = (timestep_count == NUM_TIMESTEPS);
+wire true_done = done_layer_3 && final_timestep;
+
 lif_layer1 L1 (.clk(S_AXI_ACLK), .rst(layer_reset), .start(start_pulse), .spike_in_vec(layer1_input),
                    .spike_out_vec(layer1_output), .done(done1), .skipped_mac_count(skip1));
 
@@ -99,7 +116,7 @@ lif_layer2 L2 (.clk(S_AXI_ACLK), .rst(layer_reset), .start(start2), .spike_in_ve
                    .spike_out_vec(layer2_output), .done(done2), .skipped_mac_count(skip2));
 
 lif_layer3 L3 (.clk(S_AXI_ACLK), .rst(layer_reset), .start(start3), .spike_in_vec(layer2_output),
-                   .spike_out_vec(network_output), .done(done_signal), .skipped_mac_count(skip3));
+                   .spike_out_vec(network_output), .done(done_layer_3), .skipped_mac_count(skip3));
 
 assign skip_count_total = skip1 + skip2 + skip3 ;
 

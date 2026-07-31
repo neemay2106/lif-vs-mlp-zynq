@@ -120,48 +120,9 @@ def lif_layer_step(spike_in_vec, weight_matrix, beta_int, threshold_int, membran
 
 
 
-def lif_layer3_step(spike_in_vec, weight_matrix, beta_int, threshold_int, membrane_vec,neurons,inputs_no):
-    # weight_matrix: shape (256, 784), already in Q1.15 int form
-    # membrane_vec: shape (256,), current membrane state, Q8.8 int form
-    # decayed_flags: shape (256,), bool, whether each neuron has decayed this timestep
-    spike_out_vec = []
-    new_membrane_vec = []
-    
 
-    for n in range(neurons):
-        mem = membrane_vec[n]
-        already_decayed = False
-        
-        # replicate your exact RTL logic here, input by input
-        for i in range(inputs_no):
-            spike_in = spike_in_vec[i]
-            
-            if not already_decayed:
-                mem = (mem * beta_int) >> 8
-                already_decayed = True
-                
-            
-            mem = mem + (spike_in*(weight_matrix[n*inputs_no +i] >> 7))   # Q1.15 -> Q8.8, same shift as RTL
-           
-        if mem >= threshold_int:
-            spike_out = 1 
-            
-        else:
-            spike_out = 0
-        
-        if spike_out == 1:
-            mem = 0
-        
-        spike_out_vec.append(spike_out)
-        new_membrane_vec.append(mem)
 
-    return spike_out_vec, new_membrane_vec
-
-x = np.loadtxt("/Users/neemayrajan/Documents/Project_2/spike/spikes_t1.txt")
-print(x.shape)   # (784,)
-x = x.tolist()
-
-with open("weights_layer1.hex", "r") as f:
+with open("data_layer/weights/weights_layer1.hex", "r") as f:
     data = np.array([
         x - 0x10000 if x >= 0x8000 else x
         for x in (int(line.strip(), 16) for line in f)
@@ -173,21 +134,21 @@ new_membrane = [0] * 256
 new_membrane_2 = [0] * 128
 new_membrane_3 = [0] * 10
 
-with open("weights_layer2.hex", "r") as f:
+with open("data_layer/weights/weights_layer2.hex", "r") as f:
     data_2= np.array([
         x - 0x10000 if x >= 0x8000 else x
         for x in (int(line.strip(), 16) for line in f)
     ], dtype=np.int16)
 data_2 = data_2.tolist()
 
-with open("weights_layer3.hex", "r") as f:
+with open("data_layer/weights/weights_layer3.hex", "r") as f:
     data_3= np.array([
         x - 0x10000 if x >= 0x8000 else x
         for x in (int(line.strip(), 16) for line in f)
     ], dtype=np.int16)
 data_3 = data_3.tolist()
 
-
+skip_mac = 0
 spike_count = np.zeros(10, dtype=int)
 for t in range(0,25):
     x = np.loadtxt(f"/Users/neemayrajan/Documents/Project_2/spike/spikes_t{t}.txt")
@@ -197,13 +158,14 @@ for t in range(0,25):
     np.savetxt("py_mem_t0.txt", np.array(new_membrane), fmt="%d")
     print("spikes = ",sum(spikes_out))
     spikes_out_2, new_membrane_2, skipped_mac2 = lif_layer_step(spike_in_vec=spikes_out, weight_matrix=data_2,beta_int=243,threshold_int=256,membrane_vec=new_membrane_2,neurons=128,inputs_no=256)
-    spikes_out_3, new_membrane_3,  = lif_layer3_step(spike_in_vec=spikes_out_2, weight_matrix=data_3,beta_int=243,threshold_int=256,membrane_vec=new_membrane_3,neurons=10,inputs_no=128)
+    spikes_out_3, new_membrane_3,skipped_mac3 = lif_layer_step(spike_in_vec=spikes_out_2, weight_matrix=data_3,beta_int=243,threshold_int=256,membrane_vec=new_membrane_3,neurons=10,inputs_no=128)
     print('spikes out', sum(spikes_out_3))
+    skip_mac += skipped_mac1 +skipped_mac2 + skipped_mac3
 
     spike_count += np.array(spikes_out_3)
 
 print("Total spikes over 25 timesteps:")
 print(spike_count)
-
+print("total skipped macs", skip_mac)
 prediction = np.argmax(spike_count)
 print("Prediction:", prediction)

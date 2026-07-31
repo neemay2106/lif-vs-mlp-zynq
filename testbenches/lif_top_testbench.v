@@ -167,8 +167,9 @@ initial begin
 
             
 
-            wait(dut.done_signal == 1);
-
+            wait(dut.done_layer_3 == 1);
+            $display("skipped mac count %d", dut.skip_count_total);
+            
             for (c = 0; c < 10; c = c + 1) begin
                 if (network_output[c])
                     class_accumulator[c] = class_accumulator[c] + 1;
@@ -177,6 +178,7 @@ initial begin
             @(posedge S_AXI_ACLK);
         end
 
+        wait(dut.true_done == 1);
         $display("Final class counts:");
         for (c = 0; c < 10; c = c + 1)
             $display("  class %0d: %0d spikes", c, class_accumulator[c]);

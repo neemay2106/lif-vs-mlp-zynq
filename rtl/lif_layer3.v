@@ -30,7 +30,7 @@ reg signed [15:0] mem_decayed;
 integer k;
 
 initial begin
-    $readmemh("/Users/neemayrajan/Documents/Project_2/weights_layer3.hex", weight_mem);
+    $readmemh("/Users/neemayrajan/Documents/Project_2/data_layer/weights/weights_layer3.hex", weight_mem);
 end
 
 always @(*) begin
