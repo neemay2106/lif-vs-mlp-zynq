@@ -107,7 +107,15 @@ always @(posedge S_AXI_ACLK) begin
 end
 
 wire final_timestep = (timestep_count == NUM_TIMESTEPS);
-wire true_done = done_layer_3 && final_timestep;
+reg true_done;
+
+always @(posedge S_AXI_ACLK) begin 
+    if(layer_reset) begin 
+        true_done <= 1'b0;
+    end else begin 
+        true_done <= done_layer_3 && final_timestep;
+    end
+end
 
 lif_layer1 L1 (.clk(S_AXI_ACLK), .rst(layer_reset), .start(start_pulse), .spike_in_vec(layer1_input),
                    .spike_out_vec(layer1_output), .done(done1), .skipped_mac_count(skip1));

@@ -97,6 +97,8 @@ def lif_layer_step(spike_in_vec, weight_matrix, beta_int, threshold_int, membran
             if not already_decayed:
                 mem = (mem * beta_int) >> 8
                 already_decayed = True
+            if mem >= 128:
+                print(mem)
                 
             
             if spike_in == 1:

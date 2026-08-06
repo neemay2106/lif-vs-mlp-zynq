@@ -14,7 +14,8 @@ transform = transforms.Compose([
 train_data = torchvision.datasets.MNIST('/Users/neemayrajan/Documents/Project_2/data', train=True, download=False, transform=transform)
 test_data  = torchvision.datasets.MNIST('/Users/neemayrajan/Documents/Project_2/data', train=False, download=False, transform=transform)
 
-x, y = test_data[177]  # or any index
+x, y = test_data[88]
+print(y)  # or any index
 x_flat = x.view(-1)
 x_clamp = torch.clamp(x_flat, 0, 1)
 spike_in_t0 = torch.bernoulli(x_clamp)  # one timestep's worth, 784 bits

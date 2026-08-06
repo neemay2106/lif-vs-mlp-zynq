@@ -124,22 +124,88 @@ task write_reg;
     end
 endtask
 
+task read_reg;
+    input  [31:0] addr;
+    output [31:0] data;
+    integer timeout;
+    begin
+        $display("READ_REG: starting addr=%h", addr);
+
+        @(posedge S_AXI_ACLK); #1;
+        S_AXI_ARADDR  = addr;
+        S_AXI_ARVALID = 1;
+        S_AXI_RREADY  = 1;
+
+        // wait for AR handshake
+        timeout = 0;
+        while (!S_AXI_ARREADY) begin
+            @(posedge S_AXI_ACLK);
+            timeout = timeout + 1;
+            if (timeout > 100) begin
+                $display("READ_REG: TIMEOUT waiting for ARREADY");
+                $finish;
+            end
+        end
+        @(posedge S_AXI_ACLK); #1;
+        S_AXI_ARVALID = 0;
+
+        // wait for read data
+        timeout = 0;
+        while (!S_AXI_RVALID) begin
+            @(posedge S_AXI_ACLK);
+            timeout = timeout + 1;
+            if (timeout > 100) begin
+                $display("READ_REG: TIMEOUT waiting for RVALID");
+                $finish;
+            end
+        end
+        data = S_AXI_RDATA;
+        $display("READ_REG: got data=%h RRESP=%b", data, S_AXI_RRESP);
+        @(posedge S_AXI_ACLK); #1;
+        S_AXI_RREADY = 0;
+
+        $display("READ_REG: transaction complete");
+    end
+endtask
+
+
+
 reg [0:0] spike_bits [0:783];
 integer j;
 reg [9:0] class_accumulator [0:9];
 string filename;
-                          
+reg data_read;    
 
-//input spikes beign fed 
-// initial begin
-//     $readmemh("/Users/neemayrajan/Documents/Project_2/spike/spikes_t17.txt", spike_bits);
-//     for (j = 0; j < 784; j = j + 1) begin
-//         layer1_input[j] = spike_bits[j];
-//     end
-// end
+reg true_done_prev;
+integer true_done_pulse_count;
 
+always @(posedge S_AXI_ACLK) begin
+    #1;  // sample after all NBA updates for this edge have settled
+    if (!S_AXI_ARESETN) begin
+        true_done_prev      <= 1'b0;
+        true_done_pulse_count <= 0;
+    end else begin
+        if (dut.true_done && !true_done_prev)
+            true_done_pulse_count <= true_done_pulse_count + 1;
+        true_done_prev <= dut.true_done;
+    end
+end
 integer i,t,c;
+
+initial begin
+    #59000000;  // pick a value comfortably larger than a normal full run takes
+    if (!dut.true_done || !dut.done_layer_3) begin
+        $display("FAIL: simulation timed out — true_done never asserted. Likely stuck at timestep %0d", dut.timestep_count);
+        $finish;
+    end
+end
+
+always @(posedge S_AXI_ACLK) begin
+    $display("time=%0t true_done=%b true_done_prev=%b", $time, dut.true_done, true_done_prev);
+end
+
 initial begin 
+    
     for (c = 0; c < 10; c = c + 1) class_accumulator[c] = 0;
 
     S_AXI_ARESETN = 0;
@@ -165,23 +231,37 @@ initial begin
             @(posedge S_AXI_ACLK);
             write_reg(32'h0000_0000, 32'h0000_0000);
 
+            read_reg(32'h0000_0016,data_read);
+            $display("data read is %b", data_read);
             
 
             wait(dut.done_layer_3 == 1);
-            $display("skipped mac count %d", dut.skip_count_total);
-            
+            //$display("skipped mac count %d", dut.skip_count_total);
+
             for (c = 0; c < 10; c = c + 1) begin
                 if (network_output[c])
                     class_accumulator[c] = class_accumulator[c] + 1;
             end
+            
+            @(posedge S_AXI_ACLK) #5;
 
-            @(posedge S_AXI_ACLK);
+            $display("true done value %d", dut.true_done);
         end
 
+
+        
+        if (true_done_pulse_count !== 1)
+            $display("FAIL: true_done pulsed %0d times, expected exactly 1", true_done_pulse_count);
+        else
+            $display("PASS: true_done pulsed exactly once");
+
+
         wait(dut.true_done == 1);
+        
         $display("Final class counts:");
         for (c = 0; c < 10; c = c + 1)
             $display("  class %0d: %0d spikes", c, class_accumulator[c]);
+
 
         $finish;
     end

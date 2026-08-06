@@ -59,6 +59,7 @@ always @(posedge clk) begin
                 if (start) state <= LOAD_INPUT;
             end
 
+
             LOAD_INPUT: begin
 
                 neuron_idx <= 0;
