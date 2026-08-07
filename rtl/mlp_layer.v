@@ -36,17 +36,81 @@ module mlp_layer #(
 
     reg signed [15:0] weight_mem [0:(784*256)-1];
     reg signed [31:0] neuron_sum [0:255];
+    reg signed [31:0] acc;          // raw MAC accumulator — only ever added-to during ACCUMULATE
+    reg signed [31:0] acc_shifted;  // acc >>> SHIFT_AMT — computed once, in REQUANT
+    reg signed [31:0] acc_biased;   // acc_shifted + bias_data — computed once, in REQUANT
+    reg signed [31:0] acc_relu;     // ReLU applied (or passthrough) — computed once, in REQUANT
 
 
     always @(posedge clk) begin
         if (rst) begin
-            state <= IDLE;
+            states <= IDLE;
             neuron_idx <= 0;
             input_idx <= 0;
             done <= 0;
+            acc <= 0;
+            end else begin
+        case(states) 
+        IDLE: begin 
+            done <= 0;
+            if (start) states <= LOAD;
+        end
+
+        LOAD:begin 
+            neuron_idx <= 0;
+            input_idx <= 0;
+            states <= ACCUMULATE;
+        end 
+
+        ACCUMULATE:begin 
+            act_addr <= input_idx;
+            weight_addr <= neuron_idx*N_INPUTS + input_idx;
+
+            acc <= acc + (act_data * weight_data); //error might be caused ny delayed clock cycle 
+
+            if (input_idx == N_INPUTS-1) begin
+                input_idx <= 0;
+                state <= REQUANT;
+            end else if (addr_valid) begin
+                input_idx <= input_idx + 1;
             end
         end
-        
+
+        REQUANT:begin 
+            bias_addr <= neuron_idx;
+            acc_shifted <= acc >>> 7;
+            acc_biased <= acc_shifted + bias_data;
+            acc_relu <= (RELU_EN && acc_biased[31])? 32'sd0 : acc_biased;
+
+            states <= WRITE_OUT;
+
+        end
+
+        WRITE_OUT:begin
+            if (acc_relu > 32'sd127)
+                out_data <= 8'sd127;
+            else if (acc_relu < -32'sd128)
+                out_data <= -8'sd128;
+            else
+                out_data <= acc_relu[7:0];
+
+            states <= DONE;
+        end
+
+        DONE:begin 
+            if (neuron_idx != 255) begin 
+                neuron_idx <= neuron_idx +1;
+                input_idx <= 0;
+                states <= ACCUMULATE;
+            end 
+            else begin
+                done <= 1;
+                states <= IDLE;
+            end 
+        end
+        endcase
+            end
+    end                                                                                          
 
     // FSM states — mirror the LIF layer's structure since that pattern is
     // already proven to work: IDLE, LOAD, ACCUMULATE, REQUANT, WRITE_OUT, NEXT_NEURON, DONE
