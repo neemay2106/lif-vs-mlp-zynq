@@ -13,7 +13,7 @@ mnist = torchvision.datasets.MNIST(
 )
 
 # Get the first image
-image, label = mnist[89]
+image, label = mnist[112]
 print(label)
 flat_np = image.view(-1).numpy()
 
