@@ -1,14 +1,14 @@
-module mlp_layer #(
-    parameter N_INPUTS   = 784,
-    parameter N_NEURONS  = 256,
+module mlp_layer2 #(
+    parameter N_INPUTS   = 256,
+    parameter N_NEURONS  = 128,
     parameter SHIFT_AMT  = 7,     // 7 for layers 1-2, 9 for layer 3 — set per instantiation
     parameter RELU_EN    = 1      // 1 for layers 1-2, 0 for layer 3
 )(
     input  clk, rst,
     input  start,
     output reg done,
-    input  wire signed [7:0] act_data [0:783],
-    output reg signed  [7:0] out_data [0:255]
+    input  wire signed [7:0] act_data [0:255],
+    output reg signed  [7:0] out_data [0:127]
     
 );
 
@@ -23,14 +23,14 @@ module mlp_layer #(
     
 
     initial begin
-    $readmemh("weights/layer1_bias.hex", bias_data);
-    $readmemh("weights/layer1_weights.hex", weight_data);
-
+        $readmemh("weights/layer2_bias.hex", bias_data);
+        $readmemh("weights/layer2_weights.hex", weight_data);
+        $display("DEBUG L2: bias[0]=%0d weight[0]=%0d weight[32767]=%0d", bias_data[0], weight_data[0], weight_data[32767]);
     end
 
 
-    reg signed [7:0] weight_data [0:(784*256)-1];
-    reg signed [7:0] bias_data[0:255];
+    reg signed [7:0] weight_data [0:(128*256)-1];
+    reg signed [7:0] bias_data[0:127];
     reg [3:0] states;
     reg [7:0] neuron_idx;
     reg [9:0] input_idx;
@@ -113,7 +113,7 @@ module mlp_layer #(
         end
 
         DONE:begin 
-            if (neuron_idx != 255) begin 
+            if (neuron_idx != 127) begin 
                 neuron_idx <= neuron_idx +1;
                 input_idx <= 0;
                 acc <= 0;

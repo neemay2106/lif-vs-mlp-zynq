@@ -1,14 +1,14 @@
-module mlp_layer #(
-    parameter N_INPUTS   = 784,
-    parameter N_NEURONS  = 256,
-    parameter SHIFT_AMT  = 7,     // 7 for layers 1-2, 9 for layer 3 — set per instantiation
+module mlp_layer3 #(
+    parameter N_INPUTS   = 128,
+    parameter N_NEURONS  = 10,
+    parameter SHIFT_AMT  = 9,     // 7 for layers 1-2, 9 for layer 3 — set per instantiation
     parameter RELU_EN    = 1      // 1 for layers 1-2, 0 for layer 3
 )(
     input  clk, rst,
     input  start,
     output reg done,
-    input  wire signed [7:0] act_data [0:783],
-    output reg signed  [7:0] out_data [0:255]
+    input  wire signed [7:0] act_data [0:127],
+    output reg signed  [7:0] out_data [0:9]
     
 );
 
@@ -23,14 +23,13 @@ module mlp_layer #(
     
 
     initial begin
-    $readmemh("weights/layer1_bias.hex", bias_data);
-    $readmemh("weights/layer1_weights.hex", weight_data);
-
+        $readmemh("weights/layer3_bias.hex", bias_data);
+        $readmemh("weights/layer3_weights.hex", weight_data);
     end
 
 
-    reg signed [7:0] weight_data [0:(784*256)-1];
-    reg signed [7:0] bias_data[0:255];
+    reg signed [7:0] weight_data [0:(128*10)-1];
+    reg signed [7:0] bias_data[0:10];
     reg [3:0] states;
     reg [7:0] neuron_idx;
     reg [9:0] input_idx;
@@ -79,20 +78,17 @@ module mlp_layer #(
 
         REQUANT:begin 
             
-            acc_shifted <= acc >>> 7;
+            acc_shifted <= acc >>> SHIFT_AMT;
             states <= BIAS;
 
         end
 
         BIAS:begin 
             acc_biased <= acc_shifted + bias_data[neuron_idx];
-            states <= RELU;
-        end 
-
-        RELU: begin 
-            acc_relu <= (RELU_EN && acc_biased[31])? 32'sd0 : acc_biased;
             states <= WRITE_OUT;
         end 
+
+        
 
         WRITE_OUT:begin
 
@@ -107,13 +103,13 @@ module mlp_layer #(
             else if (acc_relu < -32'sd128)
                 out_data[neuron_idx] <= -8'sd128;
             else
-                out_data[neuron_idx] <= acc_relu[7:0];
+                out_data[neuron_idx] <= acc_biased[7:0];
 
             states <= DONE;
         end
 
         DONE:begin 
-            if (neuron_idx != 255) begin 
+            if (neuron_idx != 10) begin 
                 neuron_idx <= neuron_idx +1;
                 input_idx <= 0;
                 acc <= 0;

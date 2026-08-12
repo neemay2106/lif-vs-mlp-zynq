@@ -23,6 +23,16 @@ fp_q17 = FixedPoint(1, 7)
 
 flat_q17 = fp_q17.from_float(flat_np)
 
+print(flat_q17)
+
+with open("mnist_89_q17.hex", "w") as f:
+    for value in flat_q17:
+        value_int = int(value) & 0xFF
+        f.write(f"{value_int:02X}\n")
+
+print("Created mnist_89_q17.hex")
+print("Number of lines:", len(flat_q17))
+
 
 with open("/Users/neemayrajan/Documents/Project_2/weights/layer1_weights.hex", "r") as f:
     layer1_weights= np.array([
@@ -126,3 +136,20 @@ for i in range(50):
                                10, 128, relu=False, shift_amt=9)
 
     print(final_l3)
+
+
+final_l1, sum1 = mlp_layer(flat_q17, layer1_weights, layer1_bais,
+                               256, 784, relu=True)
+
+print(final_l1)
+
+final_l2, sum2 = mlp_layer(final_l1, layer2_weights, layer2_bais,
+                               128, 256, relu=True)
+
+print(final_l2)
+
+final_l3, sum3 = mlp_layer(final_l2, layer3_weights, layer3_bais,
+                               10, 128, relu=False, shift_amt=9)
+
+print(final_l3)
+
