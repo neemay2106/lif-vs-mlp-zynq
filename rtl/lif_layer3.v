@@ -23,7 +23,10 @@ reg [8:0] input_idx;
 parameter signed [15:0] BETA = 16'sd243;
 parameter signed [15:0] THRESHOLD_VAL = 16'sd256;
 
-reg signed [15:0] weight_mem [0:(128*10)-1];
+reg signed [7:0] weight_mem [0:(128*10)-1]; // Q1.7, 8-bit
+
+wire signed [7:0]  w_q1_7 = weight_mem[neuron_idx*128 + input_idx];
+wire signed [31:0] w_q8_8 = {{24{w_q1_7[7]}}, w_q1_7} <<< 1;
 reg signed [31:0] membrane_mem [0:10];
 reg decayed_this_timestep [0:9];
 reg signed [15:0] mem_decayed;
@@ -69,7 +72,7 @@ always @(posedge clk) begin
 
             ACCUMULATE: begin
                 if (spike_in_vec[input_idx] == 1) begin
-                    membrane_mem[neuron_idx] <= mem_decayed + (weight_mem[neuron_idx*128 + input_idx] >>> 7);
+                    membrane_mem[neuron_idx] <= mem_decayed + w_q8_8;
                 end else begin
                     membrane_mem[neuron_idx] <= mem_decayed;
                     skipped_mac_count <= skipped_mac_count + 1;

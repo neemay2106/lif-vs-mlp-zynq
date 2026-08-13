@@ -7,7 +7,7 @@ THRESHOLD = 1
 WEIGHT = 0.35
 
 def lif_neuron_step(spike_in, weights, beta, threshold, mem, skipped_mac_count):
-    weights_q8_8 = weights >> 7  # Q1.15 -> Q8.8, truncating shift
+    weights_q8_8 = weights << 1  # Q1.7 -> Q8.8, left shift (extra fractional bit)
 
     mem_decayed = (mem * beta) >> 8 # Q8.8 * Q8.8 = Q16.16 intermediate, shift back to Q8.8
 
@@ -24,7 +24,7 @@ def lif_neuron_step(spike_in, weights, beta, threshold, mem, skipped_mac_count):
     return spike_out, mem_next,skipped_mac_count
 
 
-fp_w = FixedPoint(1,15)
+fp_w = FixedPoint(1,7)
 fp_m = FixedPoint(8,8)
 
 beta_int = fp_m.from_float(np.array([BETA_FLOAT]))[0]
@@ -79,7 +79,7 @@ run_and_export(seq, w, "expected_realistic.txt")
 
 
 def lif_layer_step(spike_in_vec, weight_matrix, beta_int, threshold_int, membrane_vec,neurons,inputs_no):
-    # weight_matrix: shape (256, 784), already in Q1.15 int form
+    # weight_matrix: shape (256, 784), already in Q1.7 int form
     # membrane_vec: shape (256,), current membrane state, Q8.8 int form
     # decayed_flags: shape (256,), bool, whether each neuron has decayed this timestep
     spike_out_vec = []
@@ -102,7 +102,7 @@ def lif_layer_step(spike_in_vec, weight_matrix, beta_int, threshold_int, membran
                 
             
             if spike_in == 1:
-                mem = mem + (weight_matrix[n*inputs_no +i] >> 7)   # Q1.15 -> Q8.8, same shift as RTL
+                mem = mem + (weight_matrix[n*inputs_no +i] << 1)   # Q1.7 -> Q8.8, same shift as RTL
             else:  
                   skipped += 1
                 
@@ -126,9 +126,9 @@ def lif_layer_step(spike_in_vec, weight_matrix, beta_int, threshold_int, membran
 
 with open("data_layer/weights/weights_layer1.hex", "r") as f:
     data = np.array([
-        x - 0x10000 if x >= 0x8000 else x
+        x - 0x100 if x >= 0x80 else x
         for x in (int(line.strip(), 16) for line in f)
-    ], dtype=np.int16)
+    ], dtype=np.int8)
 data = data.tolist()
 
 
@@ -138,16 +138,16 @@ new_membrane_3 = [0] * 10
 
 with open("data_layer/weights/weights_layer2.hex", "r") as f:
     data_2= np.array([
-        x - 0x10000 if x >= 0x8000 else x
+        x - 0x100 if x >= 0x80 else x
         for x in (int(line.strip(), 16) for line in f)
-    ], dtype=np.int16)
+    ], dtype=np.int8)
 data_2 = data_2.tolist()
 
 with open("data_layer/weights/weights_layer3.hex", "r") as f:
     data_3= np.array([
-        x - 0x10000 if x >= 0x8000 else x
+        x - 0x100 if x >= 0x80 else x
         for x in (int(line.strip(), 16) for line in f)
-    ], dtype=np.int16)
+    ], dtype=np.int8)
 data_3 = data_3.tolist()
 
 skip_mac = 0
