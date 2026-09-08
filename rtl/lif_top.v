@@ -1,6 +1,6 @@
 module lif_top(
 
-    input wire [783:0] layer1_input, 
+    //input wire [783:0] layer1_input, 
     input  wire        S_AXI_ACLK,
     input  wire        S_AXI_ARESETN,
     input  wire [31:0] S_AXI_AWADDR,
@@ -20,17 +20,34 @@ module lif_top(
     output wire [1:0]  S_AXI_RRESP,
     output wire         S_AXI_RVALID,
     input  wire        S_AXI_RREADY,
-    output wire  [9:0] network_output
+    //output wire  [9:0] network_output
 );
 
 wire start_bit, reset_bit;
 wire [31:0] threshold_cfg;
 wire        done_layer_3;
 wire [31:0] skip_count_total;
+wire w_wr_en;
+wire [17:0] w_wr_addr;
+wire [7:0]  w_wr_data;
+wire [1:0] w_wr_layer;
 localparam NUM_TIMESTEPS = 25; 
 reg [4:0] timestep_count; 
 
+wire [7:0] l1_rd_data;
+wire [7:0] l2_rd_data;
+wire [7:0] l3_rd_data;
 
+wire [17:0] l1_rd_addr;
+wire [14:0] l2_rd_addr;
+wire [10:0] l3_rd_addr;
+
+wire in_wr_en;
+wire [4:0] in_wr_addr;
+wire [31:0] in_wr_data;
+
+reg [799:0] input_frame;
+wire [9:0] network_output;
 
 reg start_prev;
 wire start_pulse;
@@ -69,10 +86,40 @@ axi_lite_slave axi_slave(
 
     .done(true_done),
     .skipped_mac_count(skip_count_total),
+    .class_count(class_count_flat),
+    .in_wr_en(in_wr_en),
+    .in_wr_addr(in_wr_addr),
+    .in_wr_data(in_wr_data),
+    .w_wr_en(w_wr_en),
+    .w_wr_addr(w_wr_addr),
+    .w_wr_data(w_wr_data),
+    .w_wr_layer(w_wr_layer),
     .start(start_bit),
     .rst(reset_bit),
     .threshold(threshold_cfg)
 );
+
+wire wen1 = w_wr_en & (w_wr_layer == 2'd1);
+wire wen2 = w_wr_en & (w_wr_layer == 2'd2);
+wire wen3 = w_wr_en & (w_wr_layer == 2'd3);
+
+always @(posedge S_AXI_ACLK) begin 
+    if(!S_AXI_ARESETN) begin 
+        input_frame <= 800'b0;
+    end else if(in_wr_en) input_frame[in_wr_addr*32+:32] <= in_wr_data;
+    end
+        
+wire [783:0] layer1_input = input_frame[783:0];
+
+ 
+bram #(.RAM_DEPTH(784*256),.INIT_FILE("data_layer/weights/weights_layer1.hex")) B1 (.clk(S_AXI_ACLK), .wr_en(wen1), .wr_addr(w_wr_addr[17:0]),
+                                .wr_data(w_wr_data), .rd_addr(l1_rd_addr), .rd_data(l1_rd_data));
+bram #(.RAM_DEPTH(256*128),.INIT_FILE("data_layer/weights/weights_layer2.hex")) B2 (.clk(S_AXI_ACLK), .wr_en(wen2), .wr_addr(w_wr_addr[14:0]),
+                                .wr_data(w_wr_data), .rd_addr(l2_rd_addr), .rd_data(l2_rd_data));
+bram #(.RAM_DEPTH(128*10), .INIT_FILE("data_layer/weights/weights_layer3.hex"))  B3 (.clk(S_AXI_ACLK), .wr_en(wen3), .wr_addr(w_wr_addr[10:0]),
+                                .wr_data(w_wr_data), .rd_addr(l3_rd_addr), .rd_data(l3_rd_data));
+
+
  
 wire [255:0] layer1_output;
 wire [127:0] layer2_output;
@@ -117,20 +164,39 @@ always @(posedge S_AXI_ACLK) begin
     end
 end
 
-lif_layer1 L1 (.clk(S_AXI_ACLK), .rst(layer_reset), .start(start_pulse), .spike_in_vec(layer1_input),
-                   .spike_out_vec(layer1_output), .done(done1), .skipped_mac_count(skip1));
+lif_layer #(.INPUT_LENGTH(784), .NUM_NEURONS(256) ) L1  (.clk(S_AXI_ACLK), .rst(layer_reset), .start(start_pulse), .spike_in_vec(layer1_input),
+                   .wr_rd_data(l1_rd_data),.w_rd_addr(l1_rd_addr),.spike_out_vec(layer1_output), .done(done1), .skipped_mac_count(skip1));
 
-lif_layer2 L2 (.clk(S_AXI_ACLK), .rst(layer_reset), .start(start2), .spike_in_vec(layer1_output),
-                   .spike_out_vec(layer2_output), .done(done2), .skipped_mac_count(skip2));
+lif_layer #(.INPUT_LENGTH(256), .NUM_NEURONS(128) ) L2 (.clk(S_AXI_ACLK), .rst(layer_reset), .start(start2), .spike_in_vec(layer1_output),
+                   .wr_rd_data(l2_rd_data),.w_rd_addr(l2_rd_addr),.spike_out_vec(layer2_output), .done(done2), .skipped_mac_count(skip2));
 
-lif_layer3 L3 (.clk(S_AXI_ACLK), .rst(layer_reset), .start(start3), .spike_in_vec(layer2_output),
-                   .spike_out_vec(network_output), .done(done_layer_3), .skipped_mac_count(skip3));
+lif_layer #(.INPUT_LENGTH(128), .NUM_NEURONS(10)) L3 (.clk(S_AXI_ACLK), .rst(layer_reset), .start(start3), .spike_in_vec(layer2_output),
+                   .wr_rd_data(l3_rd_data),.w_rd_addr(l3_rd_addr),.spike_out_vec(network_output), .done(done_layer_3), .skipped_mac_count(skip3));
 
 assign skip_count_total = skip1 + skip2 + skip3 ;
 
+reg done3_prev;
+always @(posedge S_AXI_ACLK)
+    done3_prev <= (layer_reset) ? 1'b0 : done_layer_3;
+wire done3_pulse = done_layer_3 && !done3_prev;
 
+reg [7:0] sum_clases [0:9];
+integer c;
+always @(posedge S_AXI_ACLK) begin
+    if (layer_reset) begin
+        for (c = 0; c < 10; c = c + 1) sum_clases[c] <= 8'd0;
+    end else if (done3_pulse) begin
+        for (c = 0; c < 10; c = c + 1)
+            if (network_output[c]) sum_clases[c] <= sum_clases[c] + 1'b1;
+    end
+end
 
-
-
+wire [79:0] class_count_flat;
+genvar g;
+generate
+  for (g = 0; g < 10; g = g + 1) begin : pack
+    assign class_count_flat[g*8 +: 8] = sum_clases[g];
+  end
+endgenerate
 
 endmodule

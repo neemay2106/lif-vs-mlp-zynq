@@ -57,8 +57,46 @@ axi_lite_slave dut (
     .S_AXI_RDATA   (M_AXI_RDATA),
     .S_AXI_RRESP   (M_AXI_RRESP),
     .S_AXI_RVALID  (M_AXI_RVALID),
-    .S_AXI_RREADY  (M_AXI_RREADY)
+    .S_AXI_RREADY  (M_AXI_RREADY),
+
+    .done              (hw_done),
+    .class_count       (hw_class_count),
+    .skipped_mac_count (hw_skipped_mac_count),
+
+    .in_wr_en          (in_wr_en),
+    .in_wr_addr        (in_wr_addr),
+    .in_wr_data        (in_wr_data),
+
+    .w_wr_en           (w_wr_en),
+    .w_wr_addr         (w_wr_addr),
+    .w_wr_data         (w_wr_data),
+    .w_wr_layer        (w_wr_layer),
+
+    .start             (start),
+    .rst               (rst),
+    .threshold         (threshold)
 );
+
+// hardware-side status inputs
+reg        hw_done;
+reg [79:0] hw_class_count;
+reg [31:0] hw_skipped_mac_count;
+
+// input-BRAM write port out of the slave
+wire        in_wr_en;
+wire [4:0]  in_wr_addr;
+wire [31:0] in_wr_data;
+
+// weight-BRAM write port out of the slave
+wire        w_wr_en;
+wire [17:0] w_wr_addr;
+wire [7:0]  w_wr_data;
+wire [1:0]  w_wr_layer;
+
+// control outputs
+wire        start;
+wire        rst;
+wire [31:0] threshold;
 
  reg [31:0] read_data;   
 
@@ -85,14 +123,17 @@ task write_reg;
         while (!b_done) begin
             @(posedge clk);
 
+            // Sample all handshakes on the clock edge, then deassert with
+            // nonblocking so VALID/READY stay stable for the whole cycle the
+            // slave sees them (a master must hold VALID until VALID && READY).
             if (!aw_done && M_AXI_AWVALID && M_AXI_AWREADY) begin
                 aw_done = 1;
-                #1 M_AXI_AWVALID = 0;
+                M_AXI_AWVALID <= 0;
             end
 
             if (!w_done && M_AXI_WVALID && M_AXI_WREADY) begin
                 w_done = 1;
-                #1 M_AXI_WVALID = 0;
+                M_AXI_WVALID <= 0;
             end
 
             if (M_AXI_BVALID && M_AXI_BREADY) begin
@@ -106,7 +147,7 @@ task write_reg;
             end
         end
         $display("WRITE_REG: BRESP=%b", M_AXI_BRESP);
-        #1 M_AXI_BREADY = 0;
+        M_AXI_BREADY <= 0;
 
         $display("WRITE_REG: transaction complete");
     end
@@ -202,6 +243,9 @@ endtask
 
 initial begin
     rst_n         = 0;
+    hw_done              = 1;
+    hw_class_count       = 80'd0;
+    hw_skipped_mac_count = 32'd0;
     M_AXI_AWADDR  = 0;
     M_AXI_AWVALID = 0;
     M_AXI_WDATA   = 0;
@@ -215,11 +259,13 @@ initial begin
     repeat (4) @(posedge clk);
     rst_n = 1;
 
-    dut.reg1_status = 32'hAAAA_AAAA;
+    // REG1 (status) is read-only over AXI and is driven by hardware `done`.
+    // An AXI write to it must have no effect; a read back must still show the
+    // hardware value {31'd0, hw_done}.
     write_reg(32'h0000_0004, 32'h1111_1111);
     read_reg(32'h0000_0004, read_data);
-    if (read_data !== 32'hAAAA_AAAA) begin
-    $display("FAIL: REG1 write-block broken — expected AAAA_AAAA, got %h", read_data);
+    if (read_data !== {31'd0, hw_done}) begin
+    $display("FAIL: REG1 write-block broken — expected %h, got %h", {31'd0, hw_done}, read_data);
     end else begin
     $display("PASS: REG1 correctly rejected AXI write");
     end

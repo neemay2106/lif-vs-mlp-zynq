@@ -4,6 +4,8 @@ module lif_layer3(
     input wire rst,
     input wire start,
     input wire [127:0] spike_in_vec,
+    input wire [7:0] wr_rd_data,
+    output wire [10:0] w_rd_addr,
     output reg [9:0] spike_out_vec,
     output reg done,
     output reg [31:0] skipped_mac_count
@@ -11,9 +13,10 @@ module lif_layer3(
 
 localparam IDLE = 3'd0;
 localparam LOAD_INPUT = 3'd1;
-localparam ACCUMULATE = 3'd2;
-localparam THRESHOLD = 3'd3;
-localparam OUT_SPIKES = 3'd4;
+localparam ADDR = 3'd2;
+localparam ACCUMULATE = 3'd3;
+localparam THRESHOLD = 3'd4;
+localparam OUT_SPIKES = 3'd5;
 
 
 reg [2:0] state;
@@ -23,18 +26,21 @@ reg [8:0] input_idx;
 parameter signed [15:0] BETA = 16'sd243;
 parameter signed [15:0] THRESHOLD_VAL = 16'sd256;
 
-reg signed [7:0] weight_mem [0:(128*10)-1]; // Q1.7, 8-bit
+// reg signed [7:0] weight_mem [0:(128*10)-1]; // Q1.7, 8-bit
+// wire signed [7:0]  w_q1_7 = weight_mem[neuron_idx*128 + input_idx];
+// wire signed [31:0] w_q8_8 = {{24{w_q1_7[7]}}, w_q1_7} <<< 1;
 
-wire signed [7:0]  w_q1_7 = weight_mem[neuron_idx*128 + input_idx];
-wire signed [31:0] w_q8_8 = {{24{w_q1_7[7]}}, w_q1_7} <<< 1;
-reg signed [31:0] membrane_mem [0:10];
+wire signed [31:0] w_q8_8 = {{24{wr_rd_data[7]}}, wr_rd_data} <<< 1;
+assign w_rd_addr = neuron_idx*128 + input_idx;
+
+reg signed [31:0] membrane_mem [0:9];
 reg decayed_this_timestep [0:9];
-reg signed [15:0] mem_decayed;
+reg signed [31:0] mem_decayed;
 integer k;
 
-initial begin
-    $readmemh("/Users/neemayrajan/Documents/Project_2/data_layer/weights/weights_layer3.hex", weight_mem);
-end
+// initial begin
+//     $readmemh("/Users/neemayrajan/Documents/Project_2/data_layer/weights/weights_layer3.hex", weight_mem);
+// end
 
 always @(*) begin
     if (decayed_this_timestep[neuron_idx])
@@ -67,11 +73,15 @@ always @(posedge clk) begin
                 for (k = 0; k < 10; k = k + 1) begin
                     decayed_this_timestep[k] <= 0;
                 end
+                state <= ADDR;
+            end
+
+            ADDR:begin 
                 state <= ACCUMULATE;
             end
 
             ACCUMULATE: begin
-                if (spike_in_vec[input_idx] == 1) begin
+                if (spike_in_vec[input_idx]) begin
                     membrane_mem[neuron_idx] <= mem_decayed + w_q8_8;
                 end else begin
                     membrane_mem[neuron_idx] <= mem_decayed;
@@ -85,6 +95,7 @@ always @(posedge clk) begin
                     state <= THRESHOLD;
                 end else begin
                     input_idx <= input_idx + 1;
+                    state <= ADDR;
                 end
             end
 
@@ -106,7 +117,7 @@ always @(posedge clk) begin
                 end else begin
                     neuron_idx <= neuron_idx + 1;
                     input_idx  <= 0;
-                    state <= ACCUMULATE;
+                    state <= ADDR;
                 end
             end
 
