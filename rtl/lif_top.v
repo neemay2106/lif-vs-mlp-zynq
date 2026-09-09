@@ -143,12 +143,20 @@ assign start2 = done1 && !done1_prev;
 assign start3 = done2 && !done2_prev;
 
 wire layer_reset = reset_bit || !S_AXI_ARESETN;
+reg  running;
+wire accepted_start = start_pulse && !running;
+
+always @(posedge S_AXI_ACLK) begin
+    if (layer_reset)          running <= 1'b0;
+    else if (accepted_start)  running <= 1'b1;
+    else if (done3_pulse)     running <= 1'b0;   //on line 181
+end
 
 
 always @(posedge S_AXI_ACLK) begin 
     if(layer_reset) begin 
         timestep_count <= 0;
-    end else if(start_pulse) begin 
+    end else if(accepted_start) begin 
         timestep_count <= timestep_count +1;
     end
 end
@@ -157,14 +165,14 @@ wire final_timestep = (timestep_count == NUM_TIMESTEPS);
 reg true_done;
 
 always @(posedge S_AXI_ACLK) begin 
-    if(layer_reset) begin 
+if(layer_reset) begin 
         true_done <= 1'b0;
     end else begin 
         true_done <= done_layer_3 && final_timestep;
     end
 end
 
-lif_layer #(.INPUT_LENGTH(784), .NUM_NEURONS(256) ) L1  (.clk(S_AXI_ACLK), .rst(layer_reset), .start(start_pulse), .spike_in_vec(layer1_input),
+lif_layer #(.INPUT_LENGTH(784), .NUM_NEURONS(256) ) L1  (.clk(S_AXI_ACLK), .rst(layer_reset), .start(accepted_start), .spike_in_vec(layer1_input),
                    .wr_rd_data(l1_rd_data),.w_rd_addr(l1_rd_addr),.spike_out_vec(layer1_output), .done(done1), .skipped_mac_count(skip1));
 
 lif_layer #(.INPUT_LENGTH(256), .NUM_NEURONS(128) ) L2 (.clk(S_AXI_ACLK), .rst(layer_reset), .start(start2), .spike_in_vec(layer1_output),
@@ -198,5 +206,5 @@ generate
     assign class_count_flat[g*8 +: 8] = sum_clases[g];
   end
 endgenerate
-
+ 
 endmodule
