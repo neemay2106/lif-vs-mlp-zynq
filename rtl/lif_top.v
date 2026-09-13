@@ -4,6 +4,7 @@ module lif_top(
     input  wire        S_AXI_ACLK,
     input  wire        S_AXI_ARESETN,
     input  wire [31:0] S_AXI_AWADDR,
+    input  wire  [2:0] S_AXI_AWPROT,
     input  wire        S_AXI_AWVALID,
     output wire         S_AXI_AWREADY,
     input  wire [31:0] S_AXI_WDATA,
@@ -14,17 +15,17 @@ module lif_top(
     output wire         S_AXI_BVALID,
     input  wire        S_AXI_BREADY,
     input  wire [31:0] S_AXI_ARADDR,
+    input wire [2:0]   S_AXI_ARPROT,
     input  wire        S_AXI_ARVALID,
     output wire         S_AXI_ARREADY,
     output wire [31:0] S_AXI_RDATA,
     output wire [1:0]  S_AXI_RRESP,
     output wire         S_AXI_RVALID,
-    input  wire        S_AXI_RREADY,
+    input  wire        S_AXI_RREADY
     //output wire  [9:0] network_output
 );
 
 wire start_bit, reset_bit;
-wire [31:0] threshold_cfg;
 wire        done_layer_3;
 wire [31:0] skip_count_total;
 wire w_wr_en;
@@ -63,6 +64,7 @@ axi_lite_slave axi_slave(
     .S_AXI_ARESETN (S_AXI_ARESETN),
 
     .S_AXI_AWADDR  (S_AXI_AWADDR),
+    .S_AXI_AWPROT  (S_AXI_AWPROT),
     .S_AXI_AWVALID (S_AXI_AWVALID),
     .S_AXI_AWREADY (S_AXI_AWREADY),
 
@@ -76,6 +78,7 @@ axi_lite_slave axi_slave(
     .S_AXI_BREADY  (S_AXI_BREADY),
 
     .S_AXI_ARADDR  (S_AXI_ARADDR),
+    .S_AXI_ARPROT   (S_AXI_ARPROT),
     .S_AXI_ARVALID (S_AXI_ARVALID),
     .S_AXI_ARREADY (S_AXI_ARREADY),
 
@@ -84,7 +87,7 @@ axi_lite_slave axi_slave(
     .S_AXI_RVALID  (S_AXI_RVALID),
     .S_AXI_RREADY  (S_AXI_RREADY),
 
-    .done(true_done),
+    .status(status),
     .skipped_mac_count(skip_count_total),
     .class_count(class_count_flat),
     .in_wr_en(in_wr_en),
@@ -95,8 +98,7 @@ axi_lite_slave axi_slave(
     .w_wr_data(w_wr_data),
     .w_wr_layer(w_wr_layer),
     .start(start_bit),
-    .rst(reset_bit),
-    .threshold(threshold_cfg)
+    .rst(reset_bit)
 );
 
 wire wen1 = w_wr_en & (w_wr_layer == 2'd1);
@@ -165,11 +167,8 @@ wire final_timestep = (timestep_count == NUM_TIMESTEPS);
 reg true_done;
 
 always @(posedge S_AXI_ACLK) begin 
-if(layer_reset) begin 
-        true_done <= 1'b0;
-    end else begin 
-        true_done <= done_layer_3 && final_timestep;
-    end
+if(layer_reset)                             true_done <= 1'b0;
+else if (done_layer_3 && final_timestep)    true_done <= 1'b1;
 end
 
 lif_layer #(.INPUT_LENGTH(784), .NUM_NEURONS(256) ) L1  (.clk(S_AXI_ACLK), .rst(layer_reset), .start(accepted_start), .spike_in_vec(layer1_input),
@@ -188,6 +187,16 @@ always @(posedge S_AXI_ACLK)
     done3_prev <= (layer_reset) ? 1'b0 : done_layer_3;
 wire done3_pulse = done_layer_3 && !done3_prev;
 
+
+// per timestep count 
+reg pass_done;
+always @(posedge S_AXI_ACLK) begin
+    if (layer_reset)         pass_done <= 1'b0;
+    else if (accepted_start) pass_done <= 1'b0;
+    else if (done3_pulse)    pass_done <= 1'b1;
+end
+
+wire [2:0] status = {pass_done, running, true_done};
 reg [7:0] sum_clases [0:9];
 integer c;
 always @(posedge S_AXI_ACLK) begin
@@ -206,5 +215,7 @@ generate
     assign class_count_flat[g*8 +: 8] = sum_clases[g];
   end
 endgenerate
+
+
  
 endmodule

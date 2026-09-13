@@ -15,7 +15,9 @@ module bram #(
 
 (* ram_style = "block" *) reg [RAM_WIDTH-1:0] mem [0:RAM_DEPTH-1];
 `ifndef SYNTHESIS
+// synthesis translate_off
 initial if (INIT_FILE != "") $readmemh(INIT_FILE, mem);
+// synthesis translate_on
 `endif
 
 always @(posedge clk) begin 

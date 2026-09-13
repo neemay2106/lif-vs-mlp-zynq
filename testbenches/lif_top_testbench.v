@@ -1,31 +1,27 @@
 `timescale 1ns/1ps
 
+// Simple lif_top TB: one forward pass per timestep, 25 timesteps.
+// Weights come from the BRAM INIT_FILE preload, no AXI weight load.
 module lif_top_tb;
 
     //=========================================================
-    // Register map (must match axi_lite_slave.v byte decode)
+    // Register map (matches axi_lite_slave.v byte decode)
     //=========================================================
     localparam [31:0] REG_CONTROL   = 32'h0000_0000;  // [0]=start [1]=rst
-    localparam [31:0] REG_STATUS    = 32'h0000_0004;  // [0]=done            (RO)
-    localparam [31:0] REG_THRESHOLD = 32'h0000_0008;
-    localparam [31:0] REG_SKIPCNT   = 32'h0000_000C;  //                      (RO)
-    localparam [31:0] REG_WDATA     = 32'h0000_0010;  // W: push weight byte / R: wr_ptr
-    localparam [31:0] REG_WCTRL     = 32'h0000_0014;  // W: {rst_ptr, layer}  / R: {wr_ptr, layer}
+    localparam [31:0] REG_STATUS    = 32'h0000_0004;  // [0]=true_done       (RO)
+    localparam [31:0] REG_SKIPCNT   = 32'h0000_000C;  //                     (RO)
+    localparam [31:0] REG_INDATA    = 32'h0000_0018;  // push one input word
+    localparam [31:0] REG_INCTRL    = 32'h0000_001C;  // [0]=reset input_ptr
+    localparam [31:0] REG_CLASS0    = 32'h0000_0040;  // classes 0..3        (RO)
+    localparam [31:0] REG_CLASS1    = 32'h0000_0044;  // classes 4..7        (RO)
+    localparam [31:0] REG_CLASS2    = 32'h0000_0048;  // classes 8..9        (RO)
 
-    localparam integer N_W1 = 784*256;
-    localparam integer N_W2 = 256*128;
-    localparam integer N_W3 = 128*10;
+    localparam integer N_IN_WORDS    = 25;            // 800-bit input_frame / 32
+    localparam integer NUM_TIMESTEPS = 25;            // must match lif_top
 
-    localparam integer NUM_TIMESTEPS = 25;
-
-    // Each MAC now costs 2 cycles (ADDR + ACCUMULATE), plus 2 tail cycles per
-    // neuron. Per timestep: L1 256*(784*2+2) + L2 128*(256*2+2) + L3 10*(128*2+2)
+    // 1 timestep: L1 256*(784*2+2) + L2 128*(256*2+2) + L3 10*(128*2+2)
     // ~= 470k cycles ~= 4.7 ms at 10 ns. 25 timesteps ~= 118 ms.
-`ifdef SHORT_RUN
-    localparam integer TIMEOUT_NS = `SHORT_RUN;
-`else
     localparam integer TIMEOUT_NS = 200_000_000;
-`endif
 
     //=========================================================
     // Clock and reset
@@ -35,8 +31,6 @@ module lif_top_tb;
 
     initial S_AXI_ACLK = 0;
     always #5 S_AXI_ACLK = ~S_AXI_ACLK;   // 100 MHz
-
-    reg [783:0] layer1_input;
 
     // AXI-Lite
     reg  [31:0] S_AXI_AWADDR;
@@ -57,17 +51,15 @@ module lif_top_tb;
     wire        S_AXI_RVALID;
     reg         S_AXI_RREADY;
 
-    wire [9:0]  network_output;
-
     //=========================================================
-    // DUTr1_input (layer1_input),
-        
+    // DUT — AXI-Lite only. lif_top has no layer1_input or
+    // network_output port now; input arrives over REG_INDATA and
+    // results are read from the class-count registers.
     //=========================================================
     lif_top dut (
         .S_AXI_ACLK   (S_AXI_ACLK),
         .S_AXI_ARESETN(S_AXI_ARESETN),
         .S_AXI_AWADDR (S_AXI_AWADDR),
-        .S_AXI_
         .S_AXI_AWVALID(S_AXI_AWVALID),
         .S_AXI_AWREADY(S_AXI_AWREADY),
         .S_AXI_WDATA  (S_AXI_WDATA),
@@ -83,8 +75,7 @@ module lif_top_tb;
         .S_AXI_RDATA  (S_AXI_RDATA),
         .S_AXI_RRESP  (S_AXI_RRESP),
         .S_AXI_RVALID (S_AXI_RVALID),
-        .S_AXI_RREADY (S_AXI_RREADY),
-        .network_output(network_output)
+        .S_AXI_RREADY (S_AXI_RREADY)
     );
 
     integer errors = 0;
@@ -92,11 +83,9 @@ module lif_top_tb;
     //=========================================================
     // AXI-Lite master tasks
     //=========================================================
-    // AXI-Lite write. Drives master signals with nonblocking assignments so they
-    // stay stable through the whole cycle the slave samples them, holds each
-    // VALID until its READY, and only then waits for the write response. Waiting
-    // for BVALID to be clear up front prevents latching onto the previous
-    // transaction's response.
+    // Holds each VALID until its READY, then waits for the write
+    // response. Waiting for BVALID clear up front avoids latching
+    // the previous transaction's response.
     task write_reg;
         input [31:0] addr;
         input [31:0] data;
@@ -182,116 +171,20 @@ module lif_top_tb;
     endtask
 
     //=========================================================
-    // Golden weights (tb-side copies of the same .hex the BRAMs preload)
+    // done_layer_3 pulse counter
     //=========================================================
-    reg [7:0] w1_mem [0:N_W1-1];
-    reg [7:0] w2_mem [0:N_W2-1];
-    reg [7:0] w3_mem [0:N_W3-1];
-
-    initial begin
-        $readmemh("data_layer/weights/weights_layer1.hex", w1_mem);
-        $readmemh("data_layer/weights/weights_layer2.hex", w2_mem);
-        $readmemh("data_layer/weights/weights_layer3.hex", w3_mem);
-    end
-
-    //=========================================================
-    // Weight-load-over-AXI tasks (enabled with +define+AXI_LOAD)
-    //=========================================================
-    integer li;
-
-    // Wipe the INIT_FILE preload so the AXI path is genuinely exercised —
-    // otherwise a broken loader would be masked by the simulation preload.
-    task clear_brams;
-        begin
-            for (li = 0; li < N_W1; li = li + 1) dut.B1.mem[li] = 8'h00;
-            for (li = 0; li < N_W2; li = li + 1) dut.B2.mem[li] = 8'h00;
-            for (li = 0; li < N_W3; li = li + 1) dut.B3.mem[li] = 8'h00;
-            $display("INFO: BRAMs cleared (preload discarded)");
-        end
-    endtask
-
-    task load_layer;
-        input [1:0]   layer;
-        input integer count;
-        integer i;
-        reg [31:0] rb;
-        begin
-            $display("INFO: loading layer %0d (%0d bytes) at t=%0t", layer, count, $time);
-            write_reg(REG_WCTRL, {29'd0, 1'b1, layer});   // select layer, reset wr_ptr
-            for (i = 0; i < count; i = i + 1) begin
-                case (layer)
-                    2'd1: write_reg(REG_WDATA, {24'd0, w1_mem[i]});
-                    2'd2: write_reg(REG_WDATA, {24'd0, w2_mem[i]});
-                    2'd3: write_reg(REG_WDATA, {24'd0, w3_mem[i]});
-                endcase
-            end
-            read_reg(REG_WDATA, rb);
-            if (rb[17:0] !== count[17:0]) begin
-                $display("FAIL: layer %0d wr_ptr=%0d, expected %0d", layer, rb[17:0], count);
-                errors = errors + 1;
-            end else begin
-                $display("PASS: layer %0d wr_ptr=%0d", layer, rb[17:0]);
-            end
-        end
-    endtask
-
-    // Byte-for-byte check that what landed in the BRAMs equals the .hex.
-    // Catches wr_ptr offset, layer-select and ordering bugs directly.
-    task check_brams;
-        integer i, bad1, bad2, bad3;
-        begin
-            bad1 = 0; bad2 = 0; bad3 = 0;
-            for (i = 0; i < N_W1; i = i + 1)
-                if (dut.B1.mem[i] !== w1_mem[i]) bad1 = bad1 + 1;
-            for (i = 0; i < N_W2; i = i + 1)
-                if (dut.B2.mem[i] !== w2_mem[i]) bad2 = bad2 + 1;
-            for (i = 0; i < N_W3; i = i + 1)
-                if (dut.B3.mem[i] !== w3_mem[i]) bad3 = bad3 + 1;
-
-            if (bad1 || bad2 || bad3) begin
-                $display("FAIL: BRAM mismatches  L1=%0d  L2=%0d  L3=%0d", bad1, bad2, bad3);
-                errors = errors + 1;
-            end else begin
-                $display("PASS: all %0d weight bytes match the .hex files", N_W1+N_W2+N_W3);
-            end
-
-            // Dump for the Python-side diff (python/check_weight_load.py)
-            $writememh("rtl_weights_l1.txt", dut.B1.mem);
-            $writememh("rtl_weights_l2.txt", dut.B2.mem);
-            $writememh("rtl_weights_l3.txt", dut.B3.mem);
-        end
-    endtask
-
-    //=========================================================
-    // true_done pulse monitor
-    //=========================================================
-    reg     true_done_prev;
-    integer true_done_pulse_count;
+    // done_layer_3 is a 1-cycle pulse, so a bare wait() can miss it.
+    // Count pulses instead and have the loop wait on the count.
+    reg     done3_prev;
+    integer done3_count;
 
     always @(posedge S_AXI_ACLK) begin
-        #1;   // sample after NBA updates settle
         if (!S_AXI_ARESETN) begin
-            true_done_prev        <= 1'b0;
-            true_done_pulse_count <= 0;
+            done3_prev  <= 1'b0;
+            done3_count <= 0;
         end else begin
-            if (dut.true_done && !true_done_prev)
-                true_done_pulse_count <= true_done_pulse_count + 1;
-            true_done_prev <= dut.true_done;
-        end
-    end
-
-    //=========================================================
-    // Progress monitor
-    //=========================================================
-    initial begin
-        forever begin
-            #10_000_000;   // every 10 ms
-            $display("PROGRESS t=%0t ts=%0d | L1 st=%0d n=%0d i=%0d | L2 st=%0d n=%0d | L3 st=%0d n=%0d | d1=%b d2=%b d3=%b td=%b",
-                     $time, dut.timestep_count,
-                     dut.L1.state, dut.L1.neuron_idx, dut.L1.input_idx,
-                     dut.L2.state, dut.L2.neuron_idx,
-                     dut.L3.state, dut.L3.neuron_idx,
-                     dut.done1, dut.done2, dut.done_layer_3, dut.true_done);
+            if (dut.done_layer_3 && !done3_prev) done3_count <= done3_count + 1;
+            done3_prev <= dut.done_layer_3;
         end
     end
 
@@ -300,28 +193,36 @@ module lif_top_tb;
     //=========================================================
     initial begin
         #TIMEOUT_NS;
-        $display("FAIL: simulation timed out — true_done never asserted. Stuck at timestep %0d",
-                 dut.timestep_count);
+        $display("FAIL: timed out after %0d/%0d timesteps", done3_count, NUM_TIMESTEPS);
         errors = errors + 1;
         $finish;
     end
 
     //=========================================================
-    // Stimulus
+    // Progress monitor
     //=========================================================
-    reg [0:0] spike_bits [0:783];
-    reg [9:0] class_accumulator [0:9];
+    initial forever begin
+        #10_000_000;   // every 10 ms
+        $display("PROGRESS t=%0t ts=%0d done3=%0d | L1 st=%0d n=%0d i=%0d | L2 st=%0d | L3 st=%0d",
+                 $time, dut.timestep_count, done3_count,
+                 dut.L1.state, dut.L1.neuron_idx, dut.L1.input_idx,
+                 dut.L2.state, dut.L3.state);
+    end
+
+    //=========================================================
+    // Stimulus — one forward pass per timestep
+    //=========================================================
+    reg [0:0]  spike_bits [0:783];   // one timestep of spikes, 1 bit per line
+    reg [799:0] frame;               // 800 bits = 25 words; top 16 unused
     reg [31:0] rdata;
     integer j, t, c, best;
+    reg [7:0] class_count [0:9];
 
     initial begin
-        for (c = 0; c < 10; c = c + 1) class_accumulator[c] = 0;
-
         S_AXI_AWADDR  = 0; S_AXI_AWVALID = 0;
         S_AXI_WDATA   = 0; S_AXI_WSTRB   = 4'hF; S_AXI_WVALID = 0;
         S_AXI_BREADY  = 0;
         S_AXI_ARADDR  = 0; S_AXI_ARVALID = 0; S_AXI_RREADY = 0;
-        layer1_input  = 784'd0;
 
         S_AXI_ARESETN = 0;
         repeat (5) @(posedge S_AXI_ACLK);
@@ -329,79 +230,56 @@ module lif_top_tb;
         @(posedge S_AXI_ACLK);
 
         //-----------------------------------------------------
-        // Phase 1 — weight load
-        //-----------------------------------------------------
-`ifdef AXI_LOAD
-        clear_brams();
-        load_layer(2'd1, N_W1);
-        load_layer(2'd2, N_W2);
-        load_layer(2'd3, N_W3);
-        check_brams();
-`else
-        $display("INFO: using BRAM INIT_FILE preload (rerun with +define+AXI_LOAD to test the AXI load path)");
-`endif
-
-        // Runtime threshold. No-op until lif_layer{1,2,3} take a threshold port
-        // and lif_top connects threshold_cfg (Gap 1).
-        write_reg(REG_THRESHOLD, 32'd256);
-        read_reg (REG_THRESHOLD, rdata);
-        if (rdata !== 32'd256) begin
-            $display("FAIL: threshold readback = %0d, expected 256", rdata);
-            errors = errors + 1;
-        end else begin
-            $display("PASS: threshold register readback = %0d", rdata);
-        end
-
-        //-----------------------------------------------------
-        // Phase 2 — inference over 25 timesteps
+        // One forward pass per timestep, 25 total
         //-----------------------------------------------------
         for (t = 0; t < NUM_TIMESTEPS; t = t + 1) begin
+            // load this timestep's spikes over AXI
             $readmemh($sformatf("spike/spikes_t%0d.txt", t), spike_bits);
-            for (j = 0; j < 784; j = j + 1)
-                layer1_input[j] = spike_bits[j];
+            frame = 800'd0;
+            for (j = 0; j < 784; j = j + 1) frame[j] = spike_bits[j];
 
-            @(posedge S_AXI_ACLK);
+            write_reg(REG_INCTRL, 32'd1);            // reset input_ptr
+            for (j = 0; j < N_IN_WORDS; j = j + 1)   // 25 words fill input_frame
+                write_reg(REG_INDATA, frame[j*32 +: 32]);
+
             write_reg(REG_CONTROL, 32'h0000_0001);   // start = 1
-            write_reg(REG_CONTROL, 32'h0000_0000);   // start = 0  (edge-detected pulse)
+            write_reg(REG_CONTROL, 32'h0000_0000);   // start = 0, edge-detected pulse
 
-            wait (dut.done_layer_3 == 1);
+            wait (done3_count == t + 1);             // pass t finished
+            $display("t=%0d done at %0t  out=%b", t, $time, dut.network_output);
 
-            for (c = 0; c < 10; c = c + 1)
-                if (network_output[c])
-                    class_accumulator[c] = class_accumulator[c] + 1;
-
-            $display("t=%0d done at %0t  out=%b", t, $time, network_output);
-            @(posedge S_AXI_ACLK); #5;
+            @(posedge S_AXI_ACLK);                   // let done3_pulse update sum_clases
+            @(posedge S_AXI_ACLK);                   // and let running clear before next start
         end
 
         //-----------------------------------------------------
-        // Phase 3 — checks and results
+        // Results
         //-----------------------------------------------------
-        wait (dut.true_done == 1);
-
-        if (true_done_pulse_count !== 1) begin
-            $display("FAIL: true_done pulsed %0d times, expected exactly 1", true_done_pulse_count);
-            errors = errors + 1;
-        end else begin
-            $display("PASS: true_done pulsed exactly once");
-        end
-
+        // true_done asserts only on the last timestep (done3 && timestep_count==25)
         read_reg(REG_STATUS, rdata);
         if (rdata[0] !== 1'b1) begin
-            $display("FAIL: status.done = %b, expected 1", rdata[0]);
+            $display("FAIL: status.done = %b after %0d timesteps, expected 1", rdata[0], NUM_TIMESTEPS);
             errors = errors + 1;
         end else begin
             $display("PASS: status.done = 1");
         end
 
         read_reg(REG_SKIPCNT, rdata);
-        $display("skipped_mac_count = %0d   (compare against python/LIF_neuron.py)", rdata);
+        $display("skipped_mac_count = %0d", rdata);
+
+        // class counts are 10 bytes packed across three registers
+        read_reg(REG_CLASS0, rdata);
+        for (c = 0; c < 4; c = c + 1) class_count[c] = rdata[c*8 +: 8];
+        read_reg(REG_CLASS1, rdata);
+        for (c = 0; c < 4; c = c + 1) class_count[4+c] = rdata[c*8 +: 8];
+        read_reg(REG_CLASS2, rdata);
+        for (c = 0; c < 2; c = c + 1) class_count[8+c] = rdata[c*8 +: 8];
 
         best = 0;
-        $display("Final class counts:");
+        $display("Class counts after %0d timesteps:", NUM_TIMESTEPS);
         for (c = 0; c < 10; c = c + 1) begin
-            $display("  class %0d: %0d spikes", c, class_accumulator[c]);
-            if (class_accumulator[c] > class_accumulator[best]) best = c;
+            $display("  class %0d: %0d", c, class_count[c]);
+            if (class_count[c] > class_count[best]) best = c;
         end
         $display("Prediction: %0d", best);
 

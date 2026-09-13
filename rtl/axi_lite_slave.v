@@ -32,7 +32,7 @@ module axi_lite_slave (
     input  wire        S_AXI_RREADY,
 
     //wire into registers
-    input wire done, 
+    input wire [2:0] status, 
     input wire [79:0] class_count,
     input wire [31:0] skipped_mac_count,
     output reg        in_wr_en,
@@ -43,13 +43,11 @@ module axi_lite_slave (
     output reg [7:0]  w_wr_data,
     output reg [1:0]  w_wr_layer,
     output wire  start,
-    output wire rst, 
-    output wire [31:0] threshold // might remove threshold config as its set in the layers alredy, might need it if im making one layer which i can instatitate multiple times
+    output wire rst
 );
 
     reg [31:0] reg0_control;
     reg [31:0] reg1_status;
-    reg [31:0] reg2_threshold;
     reg [31:0] reg3_skip_count;
     reg [79:0] reg_class_counts;
 
@@ -58,15 +56,14 @@ module axi_lite_slave (
 
     assign start     = reg0_control[0];
     assign rst       = reg0_control[1];
-    assign threshold = reg2_threshold;
-    
+
 
     always @(posedge S_AXI_ACLK) begin
     if (!S_AXI_ARESETN) begin
         reg1_status     <= 32'd0;
         reg3_skip_count <= 32'd0;
     end else begin
-        reg1_status     <= {31'd0, done};
+        reg1_status     <= {29'd0, status};
         reg3_skip_count <= skipped_mac_count;
         reg_class_counts <= class_count;
     end
@@ -95,7 +92,6 @@ module axi_lite_slave (
             aw_latched      <= 0;
             w_latched       <= 0;
             reg0_control    <= 32'd0;
-            reg2_threshold  <= 32'd0;
             S_AXI_BVALID    <= 0;
             S_AXI_BRESP     <= 2'b00;
             w_wr_en    <= 1'b0;
@@ -132,13 +128,6 @@ module axi_lite_slave (
                                   if (ws[0]) reg0_control[7:0]   <= wd[7:0];
                                   S_AXI_BRESP   <= 2'b00;
                             end
-                            12'h008:begin
-                                  if (ws[0]) reg2_threshold[7:0]   <= wd[7:0];
-                                  if (ws[1]) reg2_threshold[15:8]  <= wd[15:8];
-                                  if (ws[2]) reg2_threshold[23:16] <= wd[23:16];
-                                  if (ws[3]) reg2_threshold[31:24] <= wd[31:24];
-                                 S_AXI_BRESP   <= 2'b00;
-                            end
 
                             12'h010:begin
                                 if(ws == 4'hF) begin  
@@ -162,7 +151,7 @@ module axi_lite_slave (
                                 if(ws == 4'hF) begin
                                     in_wr_en <= 1'b1;
                                     in_wr_addr <= input_ptr;
-                                    if  in_wr_data  <= wd;
+                                    in_wr_data <= wd;   // stray "if" removed, was a syntax error
                                     input_ptr <= (input_ptr == 5'd24)? 5'b0: input_ptr+1'b1;
                                     S_AXI_BRESP   <= 2'b00;
                                 end else begin 
@@ -213,7 +202,6 @@ module axi_lite_slave (
                         case (S_AXI_ARADDR[11:0]) 
                                 12'h000: S_AXI_RDATA <= reg0_control;
                                 12'h004: S_AXI_RDATA <= reg1_status;
-                                12'h008: S_AXI_RDATA <= reg2_threshold;
                                 12'h00C: S_AXI_RDATA <= reg3_skip_count;
                                 12'h010: S_AXI_RDATA <= {14'd0, wr_ptr};
                                 12'h014: S_AXI_RDATA <= {12'd0, wr_ptr, w_wr_layer};
