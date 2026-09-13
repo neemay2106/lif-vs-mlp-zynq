@@ -47,6 +47,10 @@ wire in_wr_en;
 wire [4:0] in_wr_addr;
 wire [31:0] in_wr_data;
 
+wire [2:0] status;
+wire [79:0] class_count_flat;
+wire        done3_pulse;
+
 reg [799:0] input_frame;
 wire [9:0] network_output;
 
@@ -187,7 +191,7 @@ assign skip_count_total = skip1 + skip2 + skip3 ;
 reg done3_prev;
 always @(posedge S_AXI_ACLK)
     done3_prev <= (layer_reset) ? 1'b0 : done_layer_3;
-wire done3_pulse = done_layer_3 && !done3_prev;
+assign done3_pulse = done_layer_3 && !done3_prev;
 
 
 // per timestep count 
@@ -198,7 +202,7 @@ always @(posedge S_AXI_ACLK) begin
     else if (done3_pulse)    pass_done <= 1'b1;
 end
 
-wire [3:0] status = {chain_ready, pass_done, running, true_done};
+assign status = {chain_ready, pass_done, running, true_done};
 reg [7:0] sum_clases [0:9];
 integer c;
 always @(posedge S_AXI_ACLK) begin
@@ -210,7 +214,7 @@ always @(posedge S_AXI_ACLK) begin
     end
 end
 
-wire [79:0] class_count_flat;
+
 genvar g;
 generate
   for (g = 0; g < 10; g = g + 1) begin : pack
