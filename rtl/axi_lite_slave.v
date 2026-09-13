@@ -32,7 +32,7 @@ module axi_lite_slave (
     input  wire        S_AXI_RREADY,
 
     //wire into registers
-    input wire [2:0] status, 
+    input wire [3:0] status,
     input wire [79:0] class_count,
     input wire [31:0] skipped_mac_count,
     output reg        in_wr_en,
@@ -63,7 +63,7 @@ module axi_lite_slave (
         reg1_status     <= 32'd0;
         reg3_skip_count <= 32'd0;
     end else begin
-        reg1_status     <= {29'd0, status};
+        reg1_status     <= {28'd0, status};
         reg3_skip_count <= skipped_mac_count;
         reg_class_counts <= class_count;
     end

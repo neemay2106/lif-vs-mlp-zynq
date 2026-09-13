@@ -8,7 +8,8 @@ module lif_top_tb;
     // Register map (matches axi_lite_slave.v byte decode)
     //=========================================================
     localparam [31:0] REG_CONTROL   = 32'h0000_0000;  // [0]=start [1]=rst
-    localparam [31:0] REG_STATUS    = 32'h0000_0004;  // [0]=true_done       (RO)
+    localparam [31:0] REG_STATUS    = 32'h0000_0004;  // [0]=true_done [1]=running
+                                                      // [2]=pass_done [3]=chain_ready (RO)
     localparam [31:0] REG_SKIPCNT   = 32'h0000_000C;  //                     (RO)
     localparam [31:0] REG_INDATA    = 32'h0000_0018;  // push one input word
     localparam [31:0] REG_INCTRL    = 32'h0000_001C;  // [0]=reset input_ptr
@@ -241,6 +242,11 @@ module lif_top_tb;
             write_reg(REG_INCTRL, 32'd1);            // reset input_ptr
             for (j = 0; j < N_IN_WORDS; j = j + 1)   // 25 words fill input_frame
                 write_reg(REG_INDATA, frame[j*32 +: 32]);
+
+            // status[3] = chain_ready. After reset the layers walk a 256-cycle
+            // CLEAR state; a start issued before that finishes is dropped.
+            rdata = 0;
+            while (!rdata[3]) read_reg(REG_STATUS, rdata);
 
             write_reg(REG_CONTROL, 32'h0000_0001);   // start = 1
             write_reg(REG_CONTROL, 32'h0000_0000);   // start = 0, edge-detected pulse
