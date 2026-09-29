@@ -1,131 +1,136 @@
+
 module mlp_layer #(
     parameter N_INPUTS   = 784,
     parameter N_NEURONS  = 256,
-    parameter SHIFT_AMT  = 7,     // 7 for layers 1-2, 9 for layer 3 — set per instantiation
-    parameter RELU_EN    = 1      // 1 for layers 1-2, 0 for layer 3
+    parameter SHIFT_AMT  = 7,    
+    parameter RELU_EN    = 1,     
+    parameter AW = $clog2(N_INPUTS*N_NEURONS),        // weight address width
+    parameter BW = $clog2(N_NEURONS),                 // bias address / neuron index
+    parameter IW = $clog2(N_INPUTS)                   // input index
 )(
-    input  clk, rst,
-    input  start,
-    output reg done,
-    input  wire signed [7:0] act_data [0:783],
-    output reg signed  [7:0] out_data [0:255]
-    
+    input  wire clk,
+    input  wire rst,                                  
+    input  wire start,                                
+    output wire ready,                                
+    output reg  done,                                 
+
+    input  wire [N_INPUTS*8-1:0]  act_in,             
+    output reg  [N_NEURONS*8-1:0] out_flat,           
+
+    output wire [AW-1:0] w_rd_addr,
+    input  wire [7:0]    w_rd_data,
+    output wire [BW-1:0] b_rd_addr,
+    input  wire [7:0]    b_rd_data
 );
 
-    localparam IDLE = 4'd0;
-    localparam LOAD = 4'd1;
-    localparam ACCUMULATE = 4'd2;
-    localparam REQUANT = 4'd3;
-    localparam BIAS = 4'd4;
-    localparam RELU = 4'd5;
-    localparam WRITE_OUT = 4'd6;
-    localparam DONE = 4'd7;
-    
+    localparam IDLE       = 4'd0;
+    localparam LOAD       = 4'd1;
+    localparam PRIME      = 4'd2;                     // first weight read in flight
+    localparam ACCUMULATE = 4'd3;
+    localparam ADDR       = 4'd4;                     // BRAM latency wait
+    localparam REQUANT    = 4'd5;
+    localparam BIAS       = 4'd6;
+    localparam WRITE_OUT  = 4'd7;
+    localparam NEXT       = 4'd8;
 
-    initial begin
-    $readmemh("weights/layer1_bias.hex", bias_data);
-    $readmemh("weights/layer1_weights.hex", weight_data);
+    reg [3:0]      state;
+    reg [BW-1:0]   neuron_idx;
+    reg [IW-1:0]   input_idx;
+    reg [AW-1:0]   w_base;                            // neuron_idx*N_INPUTS, kept by adding
 
-    end
+    reg signed [31:0] acc;
+    reg signed [31:0] acc_shifted;
+    reg signed [31:0] acc_biased;
+    reg signed [31:0] val;                            // relu applied, pre-saturation
+    reg [7:0]  act_q;
 
-
-    reg signed [7:0] weight_data [0:(784*256)-1];
-    reg signed [7:0] bias_data[0:255];
-    reg [3:0] states;
-    reg [7:0] neuron_idx;
-    reg [9:0] input_idx;
-
-
-    reg signed [31:0] acc;          // raw MAC accumulator — only ever added-to during ACCUMULATE
-    reg signed [31:0] acc_shifted;  // acc >>> SHIFT_AMT — computed once, in REQUANT
-    reg signed [31:0] acc_biased;   // acc_shifted + bias_data — computed once, in REQUANT
-    reg signed [31:0] acc_relu;  
-    
-    //always @(posedge clk) begin
-    // $display("time=%0t state=%0d neuron=%0d input=%0d acc=%0d done=%b",
-    //          $time, states, neuron_idx, input_idx, acc, done);
-    // end   // ReLU applied (or passthrough) — computed once, in REQUANT
+    assign ready     = (state == IDLE);
+    assign w_rd_addr = w_base + input_idx;
+    assign b_rd_addr = neuron_idx;
 
     always @(posedge clk) begin
         if (rst) begin
-            states <= IDLE;
+            state      <= IDLE;
+            done       <= 1'b0;
             neuron_idx <= 0;
-            input_idx <= 0;
-            done <= 0;
-            acc <= 0;
-            end else begin
-        case(states) 
-        IDLE: begin 
-            done <= 0;
-            if (start) states <= LOAD;
-        end
+            input_idx  <= 0;
+            w_base     <= 0;
+            acc        <= 32'sd0;
+        end else begin
+            case (state)
 
-        LOAD:begin 
-            neuron_idx <= 0;
-            input_idx <= 0;
-            states <= ACCUMULATE;
-        end 
-
-        ACCUMULATE:begin 
-            acc <= acc + (act_data[input_idx] * weight_data[neuron_idx*N_INPUTS + input_idx]); 
-
-            if (input_idx == N_INPUTS-1) begin
-                input_idx <= 0;
-                states <= REQUANT;
-            end else begin
-            input_idx <= input_idx + 1;
-        end
-        end
-
-        REQUANT:begin 
-            
-            acc_shifted <= acc >>> 7;
-            states <= BIAS;
-
-        end
-
-        BIAS:begin 
-            acc_biased <= acc_shifted + bias_data[neuron_idx];
-            states <= RELU;
-        end 
-
-        RELU: begin 
-            acc_relu <= (RELU_EN && acc_biased[31])? 32'sd0 : acc_biased;
-            states <= WRITE_OUT;
-        end 
-
-        WRITE_OUT:begin
-
-            // $display("NEURON %0d: acc=%0d shifted=%0d biased=%0d relu=%0d",
-            //  neuron_idx,
-            //  acc,
-            //  acc_shifted,
-            //  acc_biased,
-            //  acc_relu);
-            if (acc_relu > 32'sd127)
-                out_data[neuron_idx] <= 8'sd127;
-            else if (acc_relu < -32'sd128)
-                out_data[neuron_idx] <= -8'sd128;
-            else
-                out_data[neuron_idx] <= acc_relu[7:0];
-
-            states <= DONE;
-        end
-
-        DONE:begin 
-            if (neuron_idx != 255) begin 
-                neuron_idx <= neuron_idx +1;
-                input_idx <= 0;
-                acc <= 0;
-                states <= ACCUMULATE;
-            end 
-            else begin
-                done <= 1;
-                states <= IDLE;
-            end 
-        end
-        endcase
+            IDLE: begin
+                done <= 1'b0;
+                if (start) state <= LOAD;
             end
-    end                                                                                          
+
+            LOAD: begin                                // start of an image
+                neuron_idx <= 0;
+                input_idx  <= 0;
+                w_base     <= 0;
+                acc        <= 32'sd0;
+                state      <= PRIME;
+            end
+
+            PRIME: begin                               // addr held one cycle, data valid next
+                act_q <= act_in[input_idx*8 +: 8];
+                state <= ACCUMULATE;
+            end
+
+            ACCUMULATE: begin                          // w_rd_data belongs to input_idx
+                acc <= acc + ($signed(act_q) * $signed(w_rd_data));
+
+                if (input_idx == N_INPUTS-1) begin
+                    input_idx <= 0;
+                    state     <= REQUANT;
+                end else begin
+                    input_idx <= input_idx + 1'b1;
+                    state     <= ADDR;
+                end
+            end
+
+            ADDR: begin                                // new address presented, wait for BRAM
+                act_q <= act_in[input_idx*8 +: 8];
+                state <= ACCUMULATE;
+            end
+
+            REQUANT: begin
+                acc_shifted <= acc >>> SHIFT_AMT;
+                state       <= BIAS;
+            end
+
+            BIAS: begin                                // b_rd_data stable since PRIME
+                acc_biased <= acc_shifted + $signed(b_rd_data);
+                state      <= WRITE_OUT;
+            end
+
+            WRITE_OUT: begin
+                val = (RELU_EN && acc_biased[31]) ? 32'sd0 : acc_biased;
+
+                if (val > 32'sd127)       out_flat[neuron_idx*8 +: 8] <= 8'sd127;
+                else if (val < -32'sd128) out_flat[neuron_idx*8 +: 8] <= -8'sd128;
+                else                      out_flat[neuron_idx*8 +: 8] <= val[7:0];
+
+                state <= NEXT;
+            end
+
+            NEXT: begin
+                if (neuron_idx == N_NEURONS-1) begin
+                    done  <= 1'b1;
+                    state <= IDLE;
+                end else begin
+                    neuron_idx <= neuron_idx + 1'b1;
+                    w_base     <= w_base + N_INPUTS;
+                    input_idx  <= 0;
+                    acc        <= 32'sd0;              // no carry-over between neurons
+                    state      <= PRIME;
+                end
+            end
+
+            default: state <= IDLE;
+
+            endcase
+        end
+    end
 
 endmodule

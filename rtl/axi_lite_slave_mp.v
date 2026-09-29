@@ -1,4 +1,4 @@
-module axi_lite_slave (
+module axi_lite_slave_mp (
     input  wire        S_AXI_ACLK,
     input  wire        S_AXI_ARESETN,
 
@@ -33,30 +33,31 @@ module axi_lite_slave (
 
     //wire into registers
     input wire [3:0] status,
-    input wire [79:0] class_count,
-    input wire [31:0] skipped_mac_count,
-    input wire [31:0] cycles,          // compute cycles for the whole image (all timesteps)
-    input wire [3:0]  pred,            // argmax of class_count
+    input wire [79:0] logits,
+    input wire [31:0] cycles,          // latency of last image, hardware measured
+    input wire [3:0]  pred,            // argmax of logits
     output reg        in_wr_en,
-    output reg [4:0]  in_wr_addr,
+    output reg [7:0]  in_wr_addr,
     output reg [31:0] in_wr_data,
     output reg        w_wr_en,
     output reg [17:0] w_wr_addr,
     output reg [7:0]  w_wr_data,
     output reg [1:0]  w_wr_layer,
+    output reg        w_wr_target,
     output wire  start,
     output wire rst
 );
 
+// running gate -> should it be added 
+
     reg [31:0] reg0_control;
     reg [31:0] reg1_status;
     reg [31:0] reg2_cycles;
-    reg [31:0] reg3_skip_count;
-    reg [79:0] reg_class_counts;
+    reg [79:0] reg_logits;
     reg  [3:0] reg_pred;
 
     reg [17:0] wr_ptr;
-    reg [4:0] input_ptr;
+    reg [7:0] input_ptr;
 
     assign start     = reg0_control[0];
     assign rst       = reg0_control[1];
@@ -66,14 +67,12 @@ module axi_lite_slave (
     if (!S_AXI_ARESETN) begin
         reg1_status     <= 32'd0;
         reg2_cycles     <= 32'd0;
-        reg3_skip_count <= 32'd0;
-        reg_class_counts <= 80'd0;
+        reg_logits      <= 80'd0;
         reg_pred        <= 4'd0;
-    end else begin
+        end else begin
         reg1_status     <= {28'd0, status};
         reg2_cycles     <= cycles;
-        reg3_skip_count <= skipped_mac_count;
-        reg_class_counts <= class_count;
+        reg_logits      <= logits;
         reg_pred        <= pred;
     end
     end
@@ -107,12 +106,14 @@ module axi_lite_slave (
             w_wr_addr  <= 18'd0;
             w_wr_data  <= 8'd0;
             in_wr_en <= 1'b0;
+            in_wr_addr <= 8'd0;
+            in_wr_data <= 32'd0;
             w_wr_layer <= 2'd0;
+            w_wr_target <= 1'b0;
             wr_ptr     <= 18'd0;
-            input_ptr <= 0;
-            in_wr_en <= 0;
+            input_ptr <= 8'b0;
         end else begin
-            w_wr_en  <= 1'b0;
+            w_wr_en <= 1'b0;
             in_wr_en <= 1'b0;
             case (write_state)
 
@@ -139,7 +140,7 @@ module axi_lite_slave (
                                   S_AXI_BRESP   <= 2'b00;
                             end
 
-                            12'h010:begin
+                            12'h010:begin //PDATA 
                                 if(ws == 4'hF) begin  
                                     w_wr_en   <= 1'b1;             // ← overrides the default
                                     w_wr_addr <= wr_ptr;
@@ -151,9 +152,10 @@ module axi_lite_slave (
                                 end
                             end
 
-                            12'h014:begin                    // weight ctrl
+                            12'h014:begin         //PTCRL           
                                 if (ws[0]) w_wr_layer  <= wd[1:0];
-                                if (ws[0] && wd[2]) wr_ptr <= 18'd0;
+                                if (ws[0]) w_wr_target <= wd[3]; 
+                                if (ws[0] && wd[2]) wr_ptr <= 18'd0;  // wr_en + wr_target (1 for weights and 0 for baises) + wr_layer -> how it will select
                                 S_AXI_BRESP   <= 2'b00;
                             end
 
@@ -162,7 +164,7 @@ module axi_lite_slave (
                                     in_wr_en <= 1'b1;
                                     in_wr_addr <= input_ptr;
                                     in_wr_data <= wd;   // stray "if" removed, was a syntax error
-                                    input_ptr <= (input_ptr == 5'd24)? 5'b0: input_ptr+1'b1;
+                                    input_ptr <= (input_ptr == 8'd195)? 8'b0: input_ptr+1'b1;
                                     S_AXI_BRESP   <= 2'b00;
                                 end else begin 
                                     S_AXI_BRESP <= 2'b10;
@@ -213,13 +215,12 @@ module axi_lite_slave (
                                 12'h000: S_AXI_RDATA <= reg0_control;
                                 12'h004: S_AXI_RDATA <= reg1_status;
                                 12'h008: S_AXI_RDATA <= reg2_cycles;
-                                12'h00C: S_AXI_RDATA <= reg3_skip_count;
                                 12'h010: S_AXI_RDATA <= {14'd0, wr_ptr};
-                                12'h014: S_AXI_RDATA <= {12'd0, wr_ptr, w_wr_layer};
+                                12'h014: S_AXI_RDATA <= {10'd0, wr_ptr, w_wr_target, 1'b0, w_wr_layer};
                                 12'h020: S_AXI_RDATA <= {28'd0, reg_pred};
-                                12'h040: S_AXI_RDATA <= reg_class_counts[31:0];
-                                12'h044: S_AXI_RDATA <= reg_class_counts[63:32];
-                                12'h048: S_AXI_RDATA <= reg_class_counts[79:64];
+                                12'h040: S_AXI_RDATA <= reg_logits[31:0];
+                                12'h044: S_AXI_RDATA <= reg_logits[63:32];
+                                12'h048: S_AXI_RDATA <= reg_logits[79:64];
                             default: S_AXI_RDATA <= 32'd0;
                         endcase
 
@@ -242,3 +243,4 @@ module axi_lite_slave (
     end
 
 endmodule
+

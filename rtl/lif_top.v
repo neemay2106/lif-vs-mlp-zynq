@@ -1,4 +1,9 @@
-module lif_top(
+module lif_top #(
+    // Simulation-only BRAM preload; override with "" to exercise the AXI load path.
+    parameter W1_INIT = "data_layer/weights/weights_layer1.hex",
+    parameter W2_INIT = "data_layer/weights/weights_layer2.hex",
+    parameter W3_INIT = "data_layer/weights/weights_layer3.hex"
+)(
 
     //input wire [783:0] layer1_input, 
     input  wire        S_AXI_ACLK,
@@ -47,8 +52,10 @@ wire in_wr_en;
 wire [4:0] in_wr_addr;
 wire [31:0] in_wr_data;
 
-wire [2:0] status;
+wire [3:0] status;
 wire [79:0] class_count_flat;
+reg [31:0] cycles_q;    // benchmark counters, driven at the bottom of the file
+reg  [3:0] pred_q;
 wire        done3_pulse;
 
 reg [799:0] input_frame;
@@ -94,6 +101,8 @@ axi_lite_slave axi_slave(
     .status(status),
     .skipped_mac_count(skip_count_total),
     .class_count(class_count_flat),
+    .cycles(cycles_q),
+    .pred(pred_q),
     .in_wr_en(in_wr_en),
     .in_wr_addr(in_wr_addr),
     .in_wr_data(in_wr_data),
@@ -118,11 +127,11 @@ always @(posedge S_AXI_ACLK) begin
 wire [783:0] layer1_input = input_frame[783:0];
 
  
-bram #(.RAM_DEPTH(784*256),.INIT_FILE("data_layer/weights/weights_layer1.hex")) B1 (.clk(S_AXI_ACLK), .wr_en(wen1), .wr_addr(w_wr_addr[17:0]),
+bram #(.RAM_DEPTH(784*256),.INIT_FILE(W1_INIT)) B1 (.clk(S_AXI_ACLK), .wr_en(wen1), .wr_addr(w_wr_addr[17:0]),
                                 .wr_data(w_wr_data), .rd_addr(l1_rd_addr), .rd_data(l1_rd_data));
-bram #(.RAM_DEPTH(256*128),.INIT_FILE("data_layer/weights/weights_layer2.hex")) B2 (.clk(S_AXI_ACLK), .wr_en(wen2), .wr_addr(w_wr_addr[14:0]),
+bram #(.RAM_DEPTH(256*128),.INIT_FILE(W2_INIT)) B2 (.clk(S_AXI_ACLK), .wr_en(wen2), .wr_addr(w_wr_addr[14:0]),
                                 .wr_data(w_wr_data), .rd_addr(l2_rd_addr), .rd_data(l2_rd_data));
-bram #(.RAM_DEPTH(128*10), .INIT_FILE("data_layer/weights/weights_layer3.hex"))  B3 (.clk(S_AXI_ACLK), .wr_en(wen3), .wr_addr(w_wr_addr[10:0]),
+bram #(.RAM_DEPTH(128*10), .INIT_FILE(W3_INIT))  B3 (.clk(S_AXI_ACLK), .wr_en(wen3), .wr_addr(w_wr_addr[10:0]),
                                 .wr_data(w_wr_data), .rd_addr(l3_rd_addr), .rd_data(l3_rd_data));
 
 
@@ -193,7 +202,6 @@ always @(posedge S_AXI_ACLK)
     done3_prev <= (layer_reset) ? 1'b0 : done_layer_3;
 assign done3_pulse = done_layer_3 && !done3_prev;
 
-
 // per timestep count 
 reg pass_done;
 always @(posedge S_AXI_ACLK) begin
@@ -221,6 +229,50 @@ generate
     assign class_count_flat[g*8 +: 8] = sum_clases[g];
   end
 endgenerate
+
+// ---------------------------------------------------------
+// benchmark counters, same definition as mlp_top
+// ---------------------------------------------------------
+// compute cycles only: counts while running, so the PS gaps between
+// timesteps are excluded. Accumulates over all NUM_TIMESTEPS passes.
+reg [31:0] cycle_cnt;
+
+always @(posedge S_AXI_ACLK) begin
+    if (layer_reset)                                  cycle_cnt <= 32'd0;
+    else if (accepted_start && timestep_count == 0)   cycle_cnt <= 32'd0;
+    else if (running)                                 cycle_cnt <= cycle_cnt + 1'b1;
+end
+
+always @(posedge S_AXI_ACLK) begin
+    if (layer_reset)      cycles_q <= 32'd0;
+    else if (done3_pulse) cycles_q <= cycle_cnt;
+end
+
+// argmax of the spike counts, first index wins a tie (matches np.argmax)
+reg  [3:0] pred_c;
+reg  [7:0] best_c;
+integer p;
+always @* begin
+    pred_c = 4'd0;
+    best_c = sum_clases[0];
+    for (p = 1; p < 10; p = p + 1)
+        if (sum_clases[p] > best_c) begin
+            best_c = sum_clases[p];
+            pred_c = p[3:0];
+        end
+end
+
+// sum_clases updates on done3_pulse, so sample pred one cycle later
+reg done3_pulse_d;
+always @(posedge S_AXI_ACLK) begin
+    if (layer_reset) begin
+        done3_pulse_d <= 1'b0;
+        pred_q        <= 4'd0;
+    end else begin
+        done3_pulse_d <= done3_pulse;
+        if (done3_pulse_d) pred_q <= pred_c;
+    end
+end
 
 
  

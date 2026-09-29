@@ -10,7 +10,9 @@ module lif_top_tb;
     localparam [31:0] REG_CONTROL   = 32'h0000_0000;  // [0]=start [1]=rst
     localparam [31:0] REG_STATUS    = 32'h0000_0004;  // [0]=true_done [1]=running
                                                       // [2]=pass_done [3]=chain_ready (RO)
+    localparam [31:0] REG_CYCLES    = 32'h0000_0008;  // compute cycles/image (RO)
     localparam [31:0] REG_SKIPCNT   = 32'h0000_000C;  //                     (RO)
+    localparam [31:0] REG_PRED      = 32'h0000_0020;  // argmax of counts    (RO)
     localparam [31:0] REG_INDATA    = 32'h0000_0018;  // push one input word
     localparam [31:0] REG_INCTRL    = 32'h0000_001C;  // [0]=reset input_ptr
     localparam [31:0] REG_CLASS0    = 32'h0000_0040;  // classes 0..3        (RO)
@@ -57,7 +59,15 @@ module lif_top_tb;
     // network_output port now; input arrives over REG_INDATA and
     // results are read from the class-count registers.
     //=========================================================
+    // LOAD_OVER_AXI=1 empties the BRAM preload and streams the 3 weight
+    // memories through PDATA/PCTRL — the only path that exists on hardware.
+`ifdef LOAD_OVER_AXI
+    localparam LOAD_OVER_AXI = 1;
+    lif_top #(.W1_INIT(""), .W2_INIT(""), .W3_INIT("")) dut (
+`else
+    localparam LOAD_OVER_AXI = 0;
     lif_top dut (
+`endif
         .S_AXI_ACLK   (S_AXI_ACLK),
         .S_AXI_ARESETN(S_AXI_ARESETN),
         .S_AXI_AWADDR (S_AXI_AWADDR),
@@ -171,6 +181,8 @@ module lif_top_tb;
         end
     endtask
 
+`include "axi_load_tasks.vh"
+
     //=========================================================
     // done_layer_3 pulse counter
     //=========================================================
@@ -231,6 +243,11 @@ module lif_top_tb;
         @(posedge S_AXI_ACLK);
 
         //-----------------------------------------------------
+        // weights over AXI, when the preload is off
+        //-----------------------------------------------------
+        if (LOAD_OVER_AXI) load_all_snn;
+
+        //-----------------------------------------------------
         // One forward pass per timestep, 25 total
         //-----------------------------------------------------
         for (t = 0; t < NUM_TIMESTEPS; t = t + 1) begin
@@ -288,6 +305,20 @@ module lif_top_tb;
             if (class_count[c] > class_count[best]) best = c;
         end
         $display("Prediction: %0d", best);
+
+        read_reg(REG_PRED, rdata);
+        if (rdata[3:0] !== best[3:0]) begin
+            $display("FAIL: PRED = %0d, expected %0d", rdata[3:0], best);
+            errors = errors + 1;
+        end
+
+        read_reg(REG_CYCLES, rdata);
+        $display("compute cycles for %0d timesteps = %0d (%0.2f ms at 100 MHz)",
+                 NUM_TIMESTEPS, rdata, rdata / 100000.0);
+        if (rdata < 32'd1_000_000) begin
+            $display("FAIL: cycles = %0d, counter looks dead", rdata);
+            errors = errors + 1;
+        end
 
         if (errors == 0) $display("=== ALL CHECKS PASSED ===");
         else             $display("=== %0d CHECK(S) FAILED ===", errors);

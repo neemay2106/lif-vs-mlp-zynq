@@ -1,0 +1,9 @@
+# iverilog outputs
+sim
+mlp_sim
+mlp_sim_load
+lif_sim
+lif_sim_load
+lif_dbg
+axi_tb
+.DS_Store
