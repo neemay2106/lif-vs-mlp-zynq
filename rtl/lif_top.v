@@ -248,20 +248,28 @@ always @(posedge S_AXI_ACLK) begin
     else if (done3_pulse) cycles_q <= cycle_cnt;
 end
 
-// argmax of the spike counts, first index wins a tie (matches np.argmax)
-reg  [3:0] pred_c;
-reg  [7:0] best_c;
-integer p;
-always @* begin
-    pred_c = 4'd0;
-    best_c = sum_clases[0];
-    for (p = 1; p < 10; p = p + 1)
-        if (sum_clases[p] > best_c) begin
-            best_c = sum_clases[p];
-            pred_c = p[3:0];
-        end
-end
+// argmax of the spike counts, tree of 2-input compares (4 levels instead of 9)
+// left operand is always the lower class index and wins on a tie,
+// so first index wins (matches np.argmax)
+function [11:0] amax;               // {idx[3:0], val[7:0]}
+    input [11:0] a, b;
+    amax = (b[7:0] > a[7:0]) ? b : a;
+endfunction
 
+wire [11:0] l1_0 = amax({4'd0, sum_clases[0]}, {4'd1, sum_clases[1]});
+wire [11:0] l1_1 = amax({4'd2, sum_clases[2]}, {4'd3, sum_clases[3]});
+wire [11:0] l1_2 = amax({4'd4, sum_clases[4]}, {4'd5, sum_clases[5]});
+wire [11:0] l1_3 = amax({4'd6, sum_clases[6]}, {4'd7, sum_clases[7]});
+wire [11:0] l1_4 = amax({4'd8, sum_clases[8]}, {4'd9, sum_clases[9]});
+
+wire [11:0] l2_0 = amax(l1_0, l1_1);   // classes 0..3
+wire [11:0] l2_1 = amax(l1_2, l1_3);   // classes 4..7
+
+wire [11:0] l3_0 = amax(l2_0, l2_1);   // classes 0..7
+
+wire [11:0] l4_0 = amax(l3_0, l1_4);   // classes 0..9
+
+wire [3:0] pred_c = l4_0[11:8];
 // sum_clases updates on done3_pulse, so sample pred one cycle later
 reg done3_pulse_d;
 always @(posedge S_AXI_ACLK) begin

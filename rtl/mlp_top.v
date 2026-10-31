@@ -2,12 +2,12 @@ module mlp_top #(
     // Simulation-only BRAM preload. Vivado drops these (translate_off in
     // weight_bram.v), so on hardware the PS load is the only path.
     // Override with "" to test that load path in simulation.
-    parameter W1_INIT = "weights/layer1_weights.hex",
-    parameter B1_INIT = "weights/layer1_bias.hex",
-    parameter W2_INIT = "weights/layer2_weights.hex",
-    parameter B2_INIT = "weights/layer2_bias.hex",
-    parameter W3_INIT = "weights/layer3_weights.hex",
-    parameter B3_INIT = "weights/layer3_bias.hex"
+    parameter W1_INIT = "layer1_weights.hex",
+    parameter B1_INIT = "layer1_bias.hex",
+    parameter W2_INIT = "layer2_weights.hex",
+    parameter B2_INIT = "layer2_bias.hex",
+    parameter W3_INIT = "layer3_weights.hex",
+    parameter B3_INIT = "layer3_bias.hex"
 )(
 
     
@@ -203,17 +203,83 @@ always @(posedge S_AXI_ACLK)
 assign done3_pulse = done_layer_3 && !done3_prev;
 
 // argmax of the 10 int8 logits, first index wins a tie (matches np.argmax)
-reg  [3:0] pred_c;
-reg signed [7:0] best_c;
+//lvl1 = 10->5
+reg signed [7:0] level1_val [0:4];
+reg [3:0]        level1_idx [0:4];
+
 integer k;
+
 always @* begin
-    pred_c = 4'd0;
-    best_c = $signed(layer3_output[7:0]);
-    for (k = 1; k < 10; k = k + 1)
-        if ($signed(layer3_output[k*8 +: 8]) > best_c) begin
-            best_c = $signed(layer3_output[k*8 +: 8]);
-            pred_c = k[3:0];
+    for (k = 0; k < 5; k = k + 1) begin
+        if ($signed(layer3_output[(2*k+1)*8 +: 8]) >
+            $signed(layer3_output[(2*k)*8 +: 8])) begin
+
+            level1_val[k] = $signed(layer3_output[(2*k+1)*8 +: 8]);
+            level1_idx[k] = 2*k+1;
+
+        end else begin
+
+            level1_val[k] = $signed(layer3_output[(2*k)*8 +: 8]);
+            level1_idx[k] = 2*k;
+
         end
+    end
+end
+
+//lvl2 = 5->3
+reg signed [7:0] level2_val [0:2];
+reg [3:0]        level2_idx [0:2];
+always @* begin
+    if (level1_val[1] > level1_val[0]) begin
+        level2_val[0] = level1_val[1];
+        level2_idx[0] = level1_idx[1];
+    end else begin
+        level2_val[0] = level1_val[0];
+        level2_idx[0] = level1_idx[0];
+    end
+
+    if (level1_val[3] > level1_val[2]) begin
+        level2_val[1] = level1_val[3];
+        level2_idx[1] = level1_idx[3];
+    end else begin
+        level2_val[1] = level1_val[2];
+        level2_idx[1] = level1_idx[2];
+    end
+
+    level2_val[2] = level1_val[4];
+    level2_idx[2] = level1_idx[4];
+end
+
+//lvl3 = 3->2
+
+reg signed [7:0] level3_val [0:1];
+reg [3:0]        level3_idx [0:1];
+
+always @* begin
+    if (level2_val[1] > level2_val[0]) begin
+        level3_val[0] = level2_val[1];
+        level3_idx[0] = level2_idx[1];
+    end else begin
+        level3_val[0] = level2_val[0];
+        level3_idx[0] = level2_idx[0];
+    end
+
+    level3_val[1] = level2_val[2];
+    level3_idx[1] = level2_idx[2];
+end
+
+//lvl4 = 2->1
+reg signed [7:0] best_c;
+reg [3:0]        pred_c;
+
+always @* begin
+    if (level3_val[1] > level3_val[0]) begin
+        best_c = level3_val[1];
+        pred_c    = level3_idx[1];
+    end else begin
+        best_c = level3_val[0];
+        pred_c    = level3_idx[0];
+    end
 end
 
 // cycles from accepted start to L3 done -> hardware latency per image
