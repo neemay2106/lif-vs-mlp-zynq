@@ -20,7 +20,7 @@
 
 static u32 ticks_to_us(XTime t)
 {
-    return (u32)((t * 1000000ull) / COUNTS_PER_SECOND);
+    return (u32)((t * 1000000ull) /(COUNTS_PER_SECOND));
 }
 
 static int fail(const char *step, snn_status_t s, u32 status)
