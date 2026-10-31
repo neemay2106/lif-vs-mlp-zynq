@@ -32,3 +32,9 @@ mlp_weights.h
 mlp_test_image.h
 snn_weights.h
 snn_test_spikes.h
+
+# python cache, dataset, sim logs
+__pycache__/
+*.pyc
+data/MNIST/
+logs/
