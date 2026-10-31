@@ -125,10 +125,4 @@ sw/
 - **Weights at runtime.** The BRAM `$readmemh` init is for simulation only. On the board, the ARM streams every weight byte through PDATA, and each layer's write pointer is read back to verify the count.
 - **SNN reset.** After a reset, each LIF layer clears its membrane BRAM, which takes 256 cycles. The driver waits for `CHAIN_READY` before it starts.
 
-## Roadmap
 
-- [ ] Fix the PS timer scaling and report end-to-end times
-- [ ] Make the SNN skip zero-spike MACs in time, not only count them
-- [ ] Pipeline the MAC so the PL can run at 100 MHz
-- [ ] Measure accuracy on the full MNIST test set (Linux + SSH)
-- [ ] Compare against an ARM-only software baseline
