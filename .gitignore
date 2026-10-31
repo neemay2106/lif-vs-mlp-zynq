@@ -38,3 +38,10 @@ __pycache__/
 *.pyc
 data/MNIST/
 logs/
+
+# debug / intermediate outputs written by python/ scripts and old testbenches
+/expected_*.txt
+/py_mem_t0.txt
+/rtl_mem_t0.txt
+/spikes.txt
+/layer*_output.txt
