@@ -7,3 +7,28 @@ lif_sim_load
 lif_dbg
 axi_tb
 .DS_Store
+
+# Vivado outputs
+*.runs/
+*.cache/
+*.gen/
+*.hw/
+*.ip_user_files/
+*.sim/
+.Xil/
+*.jou
+*.log
+*.str
+*.bit
+*.xsa
+
+# Vitis outputs
+build/
+_ide/
+export/
+
+# generated headers (regenerate with sw/python/gen_*_headers.py)
+mlp_weights.h
+mlp_test_image.h
+snn_weights.h
+snn_test_spikes.h
