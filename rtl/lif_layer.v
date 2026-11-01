@@ -25,8 +25,10 @@ localparam OUT_SPIKES = 4'd5;
 localparam MEM_RD     = 4'd6;   // new
 localparam DECAY      = 4'd7;   // nee
 localparam CLEAR      = 4'd8;
+localparam BUILD_LIST = 4'd9;   // event-driven: collect active input indices once per pass
 
 localparam AW = $clog2(NUM_NEURONS);
+localparam IW = $clog2(INPUT_LENGTH);
 
 reg [3:0] state;
 reg [7:0] neuron_idx;
@@ -35,9 +37,23 @@ reg [9:0] input_idx;
 parameter signed [15:0] BETA = 16'sd243;
 parameter signed [15:0] THRESHOLD_VAL = 16'sd256;
 
+// spike list: indices of the 1-bits in spike_in_vec, built in BUILD_LIST.
+// Every neuron then loops over these n_active entries only, so a zero
+// spike costs no cycles. Async-read LUTRAM keeps the address path at
+// one cycle, same as before.
+(* ram_style = "distributed" *) reg [IW-1:0] spike_list [0:INPUT_LENGTH-1];
+reg  [IW:0]   n_active;                     // 0..INPUT_LENGTH, one extra bit
+reg  [IW:0]   k;                            // position in spike_list
+reg  [17:0]   w_base;                       // neuron_idx*INPUT_LENGTH, kept by adding
+wire [IW-1:0] cur_idx = spike_list[k[IW-1:0]];
+wire          list_we = (state == BUILD_LIST) && spike_in_vec[input_idx];
+
+always @(posedge clk) begin
+    if (list_we) spike_list[n_active[IW-1:0]] <= input_idx[IW-1:0];
+end
 
 wire signed [31:0] w_q8_8 = {{24{wr_rd_data[7]}}, wr_rd_data} <<< 1;
-assign w_rd_addr = neuron_idx*(INPUT_LENGTH) + input_idx;
+assign w_rd_addr = w_base + cur_idx;
 
 //reg signed [31:0] membrane_mem [0:NUM_NEURONS-1];
 (* ram_style = "block" *) reg signed [31:0] membrane_mem [0:NUM_NEURONS-1];
@@ -74,6 +90,9 @@ always @(posedge clk) begin
             clear_idx <= 0;
             neuron_idx <= 0;
             input_idx <= 0;
+            n_active <= 0;
+            k <= 0;
+            w_base <= 0;
             skipped_mac_count <= 0;
             done <= 0;
             mem_we <= 1'b1;
@@ -101,33 +120,47 @@ always @(posedge clk) begin
 
                 neuron_idx <= 0;
                 input_idx  <= 0;
-                state <= MEM_RD;
+                n_active   <= 0;
+                w_base     <= 0;
+                k          <= 0;
+                state <= BUILD_LIST;
+            end
+
+            BUILD_LIST: begin       // 1 input per cycle; list_we writes spike_list[n_active]
+                if (spike_in_vec[input_idx]) n_active <= n_active + 1'b1;
+
+                if (input_idx == INPUT_LENGTH-1) begin
+                    input_idx <= 0;
+                    state     <= MEM_RD;
+                end else begin
+                    input_idx <= input_idx + 1;
+                end
             end
 
             MEM_RD: begin           // mem_addr = neuron_idx, BRAM latches at this edge
-                mem_we <= 1'b0;
+                mem_we <= 1'b0;     // w_rd_addr = w_base + spike_list[0] is fetched now too
                 state  <= DECAY;
             end
 
             DECAY: begin            // mem_rd now valid; multiply alone in this cycle
                 acc   <= (mem_rd * BETA) >>> 8;
-                state <= ACCUMULATE;
+                if (n_active == 0) state <= THRESHOLD;   // no spikes: leak only
+                else               state <= ACCUMULATE;
             end
 
-            ADDR:begin 
+            ADDR:begin
                 state <=  ACCUMULATE;
             end
 
-            ACCUMULATE: begin
+            ACCUMULATE: begin       // wr_rd_data belongs to spike_list[k], always a 1-bit
 
-                if (spike_in_vec[input_idx]) acc <= acc + w_q8_8;
-                else                         skipped_mac_count <= skipped_mac_count + 1;
+                acc <= acc + w_q8_8;
 
-                if (input_idx == INPUT_LENGTH-1) begin
-                    input_idx <= 0;
+                if (k == n_active-1) begin
+                    k     <= 0;
                     state <= THRESHOLD;
                 end else begin
-                    input_idx <= input_idx + 1;
+                    k     <= k + 1'b1;
                     state <= ADDR;
                 end
             end
@@ -136,6 +169,7 @@ always @(posedge clk) begin
                 spike_out_vec[neuron_idx] <= (acc >= THRESHOLD_VAL);
                 mem_we    <= 1'b1;
                 mem_wdata <= (acc >= THRESHOLD_VAL) ? 32'sd0 : acc;
+                skipped_mac_count <= skipped_mac_count + (INPUT_LENGTH - n_active);   // zero spikes of this neuron
                 state     <= OUT_SPIKES;
             end
 
@@ -146,7 +180,8 @@ always @(posedge clk) begin
                     state <= IDLE;
                 end else begin
                     neuron_idx <= neuron_idx + 1;
-                    input_idx  <= 0;
+                    w_base     <= w_base + INPUT_LENGTH;
+                    k          <= 0;
                     state      <= MEM_RD;
                 end
             end
