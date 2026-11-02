@@ -2,14 +2,14 @@
 
 <!-- banner: docs/images/banner.png -->
 
-This project builds two neural-network accelerators in Verilog, runs them on a **ZedBoard (Zynq-7020)**, and compares them on the same MNIST task against each other and against plain C on the ARM core:
+This project builds two neural-network hardware implementations in Verilog, runs them on a **ZedBoard (Zynq-7020)**, and compares them on the same MNIST task against each other and against plain C on the ARM core:
 
 - an **int8 MLP** (multi-layer perceptron)
 - a **spiking neural network** made of **LIF neurons** (leaky integrate-and-fire)
 
-Each accelerator is a custom IP with an **AXI-Lite** register interface. The ARM core loads the weights at runtime, sends in an image, and reads back the prediction and the hardware cycle counters.
+Each design is a custom IP with an **AXI-Lite** register interface. The ARM core loads the weights at runtime, sends in an image, and reads back the prediction and the hardware cycle counters.
 
-> **Status:** both accelerators and the ARM C baseline pass on the board and match the Python golden models bit for bit.
+> **Status:** both hardware designs and the ARM C baseline pass on the board and match the Python golden models bit for bit.
 
 ## Key results
 
@@ -22,7 +22,7 @@ Each accelerator is a custom IP with an **AXI-Lite** register interface. The ARM
 
 1. **Event-driven processing made the SNN 6.02x faster.** The SNN's inputs are 83.8 % zeros. The original datapath still spent 2 cycles on every zero. The event-driven version visits only the inputs that spiked. The cycle count dropped from 11,767,299 to 1,955,577, with bit-identical results. The simulated and measured cycle counts match exactly.
 2. **The SNN is still slower than the MLP.** It runs 25 timesteps per image. At the measured spike rate it would need about 6 timesteps, or about 3 % active inputs, to match the MLP.
-3. **The ARM core beats both accelerators.** Both datapaths are serial: one multiply-accumulate (MAC) every 2 cycles at 66.67 MHz. The CPU at 650 MHz with `-O2` does about 4x more MACs per second. To win, the PL needs parallel MACs, not only a faster clock (see [Next steps](#next-steps)).
+3. **The ARM core beats both hardware designs.** Both datapaths are serial: one multiply-accumulate (MAC) every 2 cycles at 66.67 MHz. The CPU at 650 MHz with `-O2` does about 4x more MACs per second. To win, the PL needs parallel MACs, not only a faster clock (see [Next steps](#next-steps)).
 
 ---
 
